@@ -20,26 +20,36 @@
 #   JSON output:
 #     docker run --network host attack-kg analyze --json "Lateral movement via RDP"
 
+# Stage 1: Build with all deps, swap torch for CPU version
+FROM python:3.12-slim AS builder
+
+WORKDIR /app
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+COPY pyproject.toml uv.lock README.md ./
+COPY src/ ./src/
+
+# Install deps, swap torch for CPU-only, build knowledge graph
+RUN uv sync --frozen --no-dev && \
+    uv pip uninstall torch && \
+    uv pip install torch --index-url https://download.pytorch.org/whl/cpu && \
+    uv run attack-kg download && \
+    uv run attack-kg ingest && \
+    uv run attack-kg build
+
+# Stage 2: Slim runtime image
 FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install uv for fast dependency management
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Copy dependency files first (for layer caching)
-COPY pyproject.toml uv.lock README.md ./
-
-# Install dependencies (no dev deps)
-RUN uv sync --frozen --no-dev
-
-# Copy application code
-COPY src/ ./src/
-
-# Pre-download embedding model + build the knowledge graph
-RUN uv run attack-kg download && \
-    uv run attack-kg ingest && \
-    uv run attack-kg build
+# Copy the built venv and data from builder
+COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app/data /app/data
+COPY --from=builder /app/pyproject.toml /app/uv.lock /app/README.md ./
+COPY --from=builder /app/src /app/src
 
 ENTRYPOINT ["uv", "run", "attack-kg"]
 CMD ["--help"]
