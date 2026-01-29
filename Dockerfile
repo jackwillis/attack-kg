@@ -45,9 +45,10 @@ WORKDIR /app
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Copy the built venv and data from builder
+# Copy the built venv, data, and HuggingFace model cache from builder
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/data /app/data
+COPY --from=builder /root/.cache/huggingface /root/.cache/huggingface
 COPY --from=builder /app/pyproject.toml /app/uv.lock /app/README.md ./
 COPY --from=builder /app/src /app/src
 
