@@ -193,8 +193,8 @@ class VectorStore:
             try:
                 self.client.delete_collection(collection_name)
                 console.print(f"[yellow]Deleted existing collection: {collection_name}[/yellow]")
-            except ValueError:
-                pass  # Collection doesn't exist
+            except Exception:
+                pass  # Collection doesn't exist or other error
 
         self.collection = self.client.get_or_create_collection(
             name=collection_name,
