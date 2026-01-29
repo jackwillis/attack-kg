@@ -36,7 +36,9 @@ RUN uv sync --frozen --no-dev && \
     uv pip install torch --index-url https://download.pytorch.org/whl/cpu && \
     uv run attack-kg download && \
     uv run attack-kg ingest && \
-    uv run attack-kg build
+    uv run attack-kg build && \
+    # Pre-cache the dependent nomic-bert-2048 model code files
+    uv run python -c "from huggingface_hub import snapshot_download; snapshot_download('nomic-ai/nomic-bert-2048', revision='7710840340a098cfb869c4f65e87cf2b1b70caca')"
 
 # Stage 2: Slim runtime image
 FROM python:3.12-slim
@@ -51,6 +53,9 @@ COPY --from=builder /app/data /app/data
 COPY --from=builder /root/.cache/huggingface /root/.cache/huggingface
 COPY --from=builder /app/pyproject.toml /app/uv.lock /app/README.md ./
 COPY --from=builder /app/src /app/src
+
+# Force offline mode - use only cached models, no runtime downloads
+ENV HF_HUB_OFFLINE=1
 
 ENTRYPOINT ["uv", "run", "attack-kg"]
 CMD ["--help"]
