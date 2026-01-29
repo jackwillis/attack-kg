@@ -1,0 +1,112 @@
+{
+    "type": "bundle",
+    "id": "bundle--test-001",
+    "spec_version": "2.1",
+    "objects": [
+        {
+            "type": "x-mitre-tactic",
+            "id": "x-mitre-tactic--test-tactic-001",
+            "name": "Credential Access",
+            "description": "The adversary is trying to steal account names and passwords.",
+            "x_mitre_shortname": "credential-access",
+            "external_references": [
+                {
+                    "source_name": "mitre-attack",
+                    "external_id": "TA0006",
+                    "url": "https://attack.mitre.org/tactics/TA0006"
+                }
+            ]
+        },
+        {
+            "type": "attack-pattern",
+            "id": "attack-pattern--test-technique-001",
+            "name": "Brute Force",
+            "description": "Adversaries may use brute force techniques to gain access to accounts when passwords are unknown or when password hashes are obtained.",
+            "x_mitre_detection": "Monitor authentication logs for system and application login failures of valid accounts.",
+            "x_mitre_platforms": ["Windows", "Linux", "macOS"],
+            "kill_chain_phases": [
+                {
+                    "kill_chain_name": "mitre-attack",
+                    "phase_name": "credential-access"
+                }
+            ],
+            "external_references": [
+                {
+                    "source_name": "mitre-attack",
+                    "external_id": "T1110",
+                    "url": "https://attack.mitre.org/techniques/T1110"
+                }
+            ]
+        },
+        {
+            "type": "attack-pattern",
+            "id": "attack-pattern--test-technique-002",
+            "name": "Password Spraying",
+            "description": "Adversaries may use a single or small list of commonly used passwords against many different accounts to attempt to acquire valid credentials.",
+            "x_mitre_detection": "Monitor authentication logs for system and application login failures of valid accounts.",
+            "x_mitre_platforms": ["Windows", "Linux", "macOS", "Azure AD"],
+            "x_mitre_is_subtechnique": true,
+            "kill_chain_phases": [
+                {
+                    "kill_chain_name": "mitre-attack",
+                    "phase_name": "credential-access"
+                }
+            ],
+            "external_references": [
+                {
+                    "source_name": "mitre-attack",
+                    "external_id": "T1110.003",
+                    "url": "https://attack.mitre.org/techniques/T1110/003"
+                }
+            ]
+        },
+        {
+            "type": "intrusion-set",
+            "id": "intrusion-set--test-group-001",
+            "name": "APT29",
+            "description": "APT29 is a threat group that has been attributed to Russia's Foreign Intelligence Service (SVR).",
+            "aliases": ["Cozy Bear", "The Dukes", "YTTRIUM"],
+            "external_references": [
+                {
+                    "source_name": "mitre-attack",
+                    "external_id": "G0016",
+                    "url": "https://attack.mitre.org/groups/G0016"
+                }
+            ]
+        },
+        {
+            "type": "course-of-action",
+            "id": "course-of-action--test-mitigation-001",
+            "name": "Multi-factor Authentication",
+            "description": "Use multi-factor authentication. Where possible, also enable multi-factor authentication on externally facing services.",
+            "external_references": [
+                {
+                    "source_name": "mitre-attack",
+                    "external_id": "M1032",
+                    "url": "https://attack.mitre.org/mitigations/M1032"
+                }
+            ]
+        },
+        {
+            "type": "relationship",
+            "id": "relationship--test-rel-001",
+            "relationship_type": "subtechnique-of",
+            "source_ref": "attack-pattern--test-technique-002",
+            "target_ref": "attack-pattern--test-technique-001"
+        },
+        {
+            "type": "relationship",
+            "id": "relationship--test-rel-002",
+            "relationship_type": "uses",
+            "source_ref": "intrusion-set--test-group-001",
+            "target_ref": "attack-pattern--test-technique-002"
+        },
+        {
+            "type": "relationship",
+            "id": "relationship--test-rel-003",
+            "relationship_type": "mitigates",
+            "source_ref": "course-of-action--test-mitigation-001",
+            "target_ref": "attack-pattern--test-technique-002"
+        }
+    ]
+}
