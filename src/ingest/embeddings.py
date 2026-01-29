@@ -109,17 +109,30 @@ def extract_techniques_from_graph(graph) -> list[TechniqueDocument]:
     return documents
 
 
+# Pin model revision to avoid runtime downloads in Docker
+NOMIC_EMBED_REVISION = "e5cf08aadaa33385f5990def41f7a23405aec398"
+
+
 class EmbeddingGenerator:
     """Generate embeddings using sentence-transformers."""
 
-    def __init__(self, model_name: str = "nomic-ai/nomic-embed-text-v1.5"):
+    def __init__(
+        self,
+        model_name: str = "nomic-ai/nomic-embed-text-v1.5",
+        revision: str | None = None,
+    ):
         """
         Initialize the embedding model.
 
         Args:
             model_name: Name of the sentence-transformers model to use
+            revision: Model revision (commit hash) to pin
         """
         self.model_name = model_name
+        self.revision = revision
+        # Default to pinned revision for nomic model
+        if model_name == "nomic-ai/nomic-embed-text-v1.5" and revision is None:
+            self.revision = NOMIC_EMBED_REVISION
         self._model = None
 
     @property
@@ -129,7 +142,11 @@ class EmbeddingGenerator:
             console.print(f"[blue]Loading embedding model: {self.model_name}[/blue]")
             from sentence_transformers import SentenceTransformer
 
-            self._model = SentenceTransformer(self.model_name, trust_remote_code=True)
+            self._model = SentenceTransformer(
+                self.model_name,
+                trust_remote_code=True,
+                revision=self.revision,
+            )
         return self._model
 
     def embed_text(self, text: str) -> list[float]:
