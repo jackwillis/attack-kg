@@ -43,7 +43,7 @@ STIX JSON → StixToRdfConverter → N-Triples → Oxigraph (SPARQL)
 
 - **`src/ingest/stix_to_rdf.py`** - Two-pass conversion: entities first (builds STIX ID → URI mapping), then relationships (resolves references).
 
-- **`src/ingest/embeddings.py`** - Generates embeddings with sentence-transformers (all-MiniLM-L6-v2), stores in ChromaDB.
+- **`src/ingest/embeddings.py`** - Generates embeddings with sentence-transformers (nomic-embed-text-v1.5, 8K token context), stores in ChromaDB.
 
 - **`src/query/hybrid.py`** - `HybridQueryEngine` combines semantic search results with SPARQL graph enrichment.
 

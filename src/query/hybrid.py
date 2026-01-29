@@ -72,7 +72,7 @@ class HybridQueryEngine:
         self,
         graph_path: Path | str | None = None,
         vector_path: Path | str | None = None,
-        embedding_model: str = "all-MiniLM-L6-v2",
+        embedding_model: str = "nomic-ai/nomic-embed-text-v1.5",
         *,
         graph: AttackGraph | None = None,
         semantic: SemanticSearchEngine | None = None,

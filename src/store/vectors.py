@@ -21,7 +21,7 @@ class SemanticSearch:
     def __init__(
         self,
         store_path: Path | str | None = None,
-        model_name: str = "all-MiniLM-L6-v2",
+        model_name: str = "nomic-ai/nomic-embed-text-v1.5",
     ):
         """
         Initialize semantic search.

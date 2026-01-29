@@ -112,7 +112,7 @@ def extract_techniques_from_graph(graph) -> list[TechniqueDocument]:
 class EmbeddingGenerator:
     """Generate embeddings using sentence-transformers."""
 
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, model_name: str = "nomic-ai/nomic-embed-text-v1.5"):
         """
         Initialize the embedding model.
 
@@ -129,7 +129,7 @@ class EmbeddingGenerator:
             console.print(f"[blue]Loading embedding model: {self.model_name}[/blue]")
             from sentence_transformers import SentenceTransformer
 
-            self._model = SentenceTransformer(self.model_name)
+            self._model = SentenceTransformer(self.model_name, trust_remote_code=True)
         return self._model
 
     def embed_text(self, text: str) -> list[float]:
@@ -165,13 +165,14 @@ class EmbeddingGenerator:
 class VectorStore:
     """ChromaDB vector store for technique embeddings."""
 
-    def __init__(self, persist_dir: Path | str | None = None, collection_name: str = "techniques"):
+    def __init__(self, persist_dir: Path | str | None = None, collection_name: str = "techniques", reset: bool = False):
         """
         Initialize ChromaDB store.
 
         Args:
             persist_dir: Directory for persistent storage. None for in-memory.
             collection_name: Name of the collection to use
+            reset: If True, delete existing collection before creating (useful when changing embedding models)
         """
         import chromadb
         from chromadb.config import Settings
@@ -187,6 +188,13 @@ class VectorStore:
             console.print(f"[green]Using ChromaDB store at:[/green] {self.persist_dir}")
         else:
             self.client = chromadb.Client(Settings(anonymized_telemetry=False))
+
+        if reset:
+            try:
+                self.client.delete_collection(collection_name)
+                console.print(f"[yellow]Deleted existing collection: {collection_name}[/yellow]")
+            except ValueError:
+                pass  # Collection doesn't exist
 
         self.collection = self.client.get_or_create_collection(
             name=collection_name,
@@ -278,7 +286,7 @@ class VectorStore:
 def build_vector_store(
     graph,
     persist_dir: Path | str | None = None,
-    model_name: str = "all-MiniLM-L6-v2",
+    model_name: str = "nomic-ai/nomic-embed-text-v1.5",
 ) -> VectorStore:
     """
     Build vector store from RDF graph.
@@ -299,7 +307,7 @@ def build_vector_store(
     embeddings = embedder.embed_documents(documents)
 
     console.print("\n[bold]Step 3/3:[/bold] Storing in ChromaDB...")
-    store = VectorStore(persist_dir)
+    store = VectorStore(persist_dir, reset=True)
     store.add_documents(documents, embeddings)
 
     console.print(f"\n[green bold]Vector store complete![/green bold] {store.count()} techniques indexed.")

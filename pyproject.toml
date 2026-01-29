@@ -12,6 +12,7 @@ dependencies = [
     # Vector Store
     "chromadb>=0.4.22",
     "sentence-transformers>=2.2.2",
+    "einops>=0.7.0",  # Required by nomic-embed-text-v1.5
 
     # LLM Integration
     "ollama>=0.1.6",

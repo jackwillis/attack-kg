@@ -40,7 +40,7 @@ class SemanticSearchEngine:
     def __init__(
         self,
         vector_store_path: Path | str,
-        model_name: str = "all-MiniLM-L6-v2",
+        model_name: str = "nomic-ai/nomic-embed-text-v1.5",
     ):
         """
         Initialize the semantic search engine.
