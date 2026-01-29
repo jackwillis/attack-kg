@@ -26,12 +26,37 @@ uv run attack-kg group APT29
 # Semantic search
 uv run attack-kg search "credential theft from memory"
 
+# Analyze a finding for ATT&CK techniques and remediation
+uv run attack-kg analyze "password spraying against Azure AD"
+uv run attack-kg analyze --file finding.txt
+
 # Run SPARQL queries
 uv run attack-kg query "SELECT ?name WHERE { ?t a attack:Technique ; rdfs:label ?name } LIMIT 5"
 
 # Interactive REPL
 uv run attack-kg repl
+uv run attack-kg repl --model gpt-oss:20b  # specify LLM model
 ```
+
+## Interactive REPL
+
+The REPL provides an interactive session with command history and tab completion:
+
+```
+attack-kg> search password spraying
+attack-kg> tech T1110.003
+attack-kg> group APT29
+attack-kg> analyze credential theft via mimikatz
+attack-kg> analyze @finding.txt    # read from file
+attack-kg> sparql SELECT ?name WHERE { ?t a attack:Technique ; rdfs:label ?name } LIMIT 5
+```
+
+## Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OLLAMA_HOST` | Ollama server URL (for Docker/remote) | `http://localhost:11434` |
+| `OPENAI_API_KEY` | OpenAI API key (for `--backend openai`) | - |
 
 ## Architecture
 

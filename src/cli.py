@@ -389,12 +389,15 @@ def repl(
 
     console.print(Panel(
         "Commands:\n"
-        "  sparql <query>   - Execute SPARQL query\n"
-        "  search <text>    - Semantic search\n"
-        "  tech <id>        - Get technique details\n"
-        "  group <name>     - Get group techniques\n"
-        "  analyze <text>   - Analyze finding for techniques & remediation\n"
-        "  quit             - Exit\n",
+        "  sparql <query>     - Execute SPARQL query\n"
+        "  search <text>      - Semantic search\n"
+        "  tech <id>          - Get technique details\n"
+        "  group <name>       - Get group techniques\n"
+        "  analyze <text>     - Analyze finding for techniques & remediation\n"
+        "  analyze @<file>    - Analyze finding from file\n"
+        "  quit               - Exit\n"
+        "\n"
+        "Tab completion and command history enabled.",
         title="ATT&CK Knowledge Graph REPL",
     ))
 
@@ -455,11 +458,22 @@ def repl(
         elif cmd == "analyze" and arg:
             from src.reasoning.analyzer import print_analysis_result
 
+            # Support @filename to read from file
+            if arg.startswith("@"):
+                file_path = Path(arg[1:]).expanduser()
+                if not file_path.exists():
+                    console.print(f"[red]File not found:[/red] {file_path}")
+                    continue
+                finding_text = file_path.read_text().strip()
+                console.print(f"[dim]Reading from {file_path}[/dim]")
+            else:
+                finding_text = arg
+
             anlzr = get_analyzer()
             if anlzr:
                 try:
                     console.print("[dim]Analyzing...[/dim]")
-                    result = anlzr.analyze(arg, top_k=5)
+                    result = anlzr.analyze(finding_text, top_k=5)
                     print_analysis_result(result)
                 except Exception as e:
                     console.print(f"[red]Analysis error:[/red] {e}")
