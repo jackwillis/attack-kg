@@ -333,21 +333,46 @@ def analyze(
 def repl(
     graph_dir: Path = typer.Option(DEFAULT_GRAPH_DIR, help="Oxigraph store directory"),
     vector_dir: Path = typer.Option(DEFAULT_VECTOR_DIR, help="ChromaDB store directory"),
+    backend: str = typer.Option("ollama", "--backend", "-b", help="LLM backend: ollama or openai"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name override"),
 ):
     """Start an interactive query session."""
     from src.store.graph import AttackGraph
-    from src.store.vectors import SemanticSearch
+    from src.query.semantic import SemanticSearchEngine
 
     graph = AttackGraph(graph_dir)
-    searcher = SemanticSearch(vector_dir)
+    semantic = SemanticSearchEngine(vector_dir)
+
+    # Lazy-loaded analyzer components
+    analyzer = None
+
+    def get_analyzer():
+        nonlocal analyzer
+        if analyzer is None:
+            from src.query.hybrid import HybridQueryEngine
+            from src.reasoning.llm import get_llm_backend
+            from src.reasoning.analyzer import AttackAnalyzer
+
+            console.print("[dim]Initializing LLM...[/dim]")
+            try:
+                llm = get_llm_backend(backend=backend, model=model)
+                hybrid = HybridQueryEngine(graph=graph, semantic=semantic)
+                analyzer = AttackAnalyzer(hybrid, llm)
+            except Exception as e:
+                console.print(f"[red]Error initializing analyzer:[/red] {e}")
+                if backend == "ollama":
+                    console.print("[dim]Make sure Ollama is running: ollama serve[/dim]")
+                return None
+        return analyzer
 
     console.print(Panel(
         "Commands:\n"
-        "  sparql <query>  - Execute SPARQL query\n"
-        "  search <text>   - Semantic search\n"
-        "  tech <id>       - Get technique details\n"
-        "  group <name>    - Get group techniques\n"
-        "  quit            - Exit\n",
+        "  sparql <query>   - Execute SPARQL query\n"
+        "  search <text>    - Semantic search\n"
+        "  tech <id>        - Get technique details\n"
+        "  group <name>     - Get group techniques\n"
+        "  analyze <text>   - Analyze finding for techniques & remediation\n"
+        "  quit             - Exit\n",
         title="ATT&CK Knowledge Graph REPL",
     ))
 
@@ -372,7 +397,19 @@ def repl(
             except Exception as e:
                 console.print(f"[red]Query error:[/red] {e}")
         elif cmd == "search" and arg:
-            searcher.print_search_results(arg)
+            from rich.table import Table
+            results = semantic.search(arg, top_k=5)
+            if results:
+                table = Table(title=f"Techniques similar to: '{arg}'")
+                table.add_column("ID", style="cyan")
+                table.add_column("Name", style="green")
+                table.add_column("Tactics")
+                table.add_column("Similarity", justify="right")
+                for r in results:
+                    table.add_row(r.attack_id, r.name, ", ".join(r.tactics), f"{r.similarity:.3f}")
+                console.print(table)
+            else:
+                console.print("[yellow]No results found[/yellow]")
         elif cmd == "tech" and arg:
             tech = graph.get_technique(arg)
             if tech:
@@ -393,8 +430,19 @@ def repl(
                     console.print(f"  ... and {len(techniques) - 10} more")
             else:
                 console.print(f"[yellow]No techniques found for: {arg}[/yellow]")
+        elif cmd == "analyze" and arg:
+            from src.reasoning.analyzer import print_analysis_result
+
+            anlzr = get_analyzer()
+            if anlzr:
+                try:
+                    console.print("[dim]Analyzing...[/dim]")
+                    result = anlzr.analyze(arg, top_k=5)
+                    print_analysis_result(result)
+                except Exception as e:
+                    console.print(f"[red]Analysis error:[/red] {e}")
         else:
-            console.print("[yellow]Unknown command. Try: sparql, search, tech, group, quit[/yellow]")
+            console.print("[yellow]Unknown command. Try: sparql, search, tech, group, analyze, quit[/yellow]")
 
     console.print("\n[dim]Goodbye![/dim]")
 

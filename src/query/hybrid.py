@@ -70,9 +70,12 @@ class HybridQueryEngine:
 
     def __init__(
         self,
-        graph_path: Path | str,
-        vector_path: Path | str,
+        graph_path: Path | str | None = None,
+        vector_path: Path | str | None = None,
         embedding_model: str = "all-MiniLM-L6-v2",
+        *,
+        graph: AttackGraph | None = None,
+        semantic: SemanticSearchEngine | None = None,
     ):
         """
         Initialize the hybrid query engine.
@@ -81,9 +84,11 @@ class HybridQueryEngine:
             graph_path: Path to Oxigraph persistent storage
             vector_path: Path to ChromaDB persistent storage
             embedding_model: Sentence transformer model
+            graph: Existing AttackGraph instance (avoids lock conflicts)
+            semantic: Existing SemanticSearchEngine instance
         """
-        self.graph = AttackGraph(graph_path)
-        self.semantic = SemanticSearchEngine(vector_path, embedding_model)
+        self.graph = graph if graph is not None else AttackGraph(graph_path)
+        self.semantic = semantic if semantic is not None else SemanticSearchEngine(vector_path, embedding_model)
 
     def query(
         self,
