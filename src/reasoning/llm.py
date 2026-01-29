@@ -47,16 +47,18 @@ class LLMBackend(ABC):
 class OllamaBackend(LLMBackend):
     """Ollama local LLM backend."""
 
-    def __init__(self, model: str = "llama3.2", host: str = "http://localhost:11434"):
+    def __init__(self, model: str = "llama3.2", host: str | None = None):
         """
         Initialize Ollama backend.
 
         Args:
             model: Model name (e.g., "llama3.2", "mistral", "codellama")
-            host: Ollama server URL
+            host: Ollama server URL (defaults to OLLAMA_HOST env var or http://localhost:11434)
         """
+        import os
+
         self.model = model
-        self.host = host
+        self.host = host or os.environ.get("OLLAMA_HOST", "http://localhost:11434")
         self._client = None
 
     @property

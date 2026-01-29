@@ -337,8 +337,30 @@ def repl(
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name override"),
 ):
     """Start an interactive query session."""
+    import atexit
+    import readline
+
     from src.store.graph import AttackGraph
     from src.query.semantic import SemanticSearchEngine
+
+    # Set up readline history
+    history_file = Path.home() / ".attack_kg_history"
+    try:
+        readline.read_history_file(history_file)
+    except FileNotFoundError:
+        pass
+    readline.set_history_length(1000)
+    atexit.register(readline.write_history_file, history_file)
+
+    # Set up tab completion
+    commands = ["sparql", "search", "tech", "group", "analyze", "quit", "exit", "help"]
+
+    def completer(text: str, state: int) -> str | None:
+        options = [cmd for cmd in commands if cmd.startswith(text)]
+        return options[state] if state < len(options) else None
+
+    readline.set_completer(completer)
+    readline.parse_and_bind("tab: complete")
 
     graph = AttackGraph(graph_dir)
     semantic = SemanticSearchEngine(vector_dir)
