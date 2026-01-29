@@ -259,6 +259,77 @@ def search(
 
 
 @app.command()
+def analyze(
+    finding: Optional[str] = typer.Argument(None, help="Attack narrative or finding text"),
+    file: Optional[Path] = typer.Option(None, "--file", "-f", help="Read finding from file"),
+    backend: str = typer.Option("ollama", "--backend", "-b", help="LLM backend: ollama or openai"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name override"),
+    top_k: int = typer.Option(5, "-k", help="Number of candidate techniques to consider"),
+    graph_dir: Path = typer.Option(DEFAULT_GRAPH_DIR, help="Oxigraph store directory"),
+    vector_dir: Path = typer.Option(DEFAULT_VECTOR_DIR, help="ChromaDB store directory"),
+    output_json: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Analyze an attack narrative to identify ATT&CK techniques and suggest remediation.
+
+    Examples:
+        attack-kg analyze "Found valid credentials through password spraying against Azure AD"
+        attack-kg analyze --file finding.txt
+        attack-kg analyze --backend openai "Attacker used mimikatz to dump credentials"
+    """
+    import json
+    from src.query.hybrid import HybridQueryEngine
+    from src.reasoning.llm import get_llm_backend
+    from src.reasoning.analyzer import AttackAnalyzer, print_analysis_result
+
+    # Get finding text
+    if file:
+        if not file.exists():
+            console.print(f"[red]File not found:[/red] {file}")
+            raise typer.Exit(1)
+        finding_text = file.read_text().strip()
+    elif finding:
+        finding_text = finding
+    else:
+        console.print("[red]Error:[/red] Provide finding text or use --file")
+        raise typer.Exit(1)
+
+    if not finding_text:
+        console.print("[red]Error:[/red] Finding text is empty")
+        raise typer.Exit(1)
+
+    # Initialize components
+    console.print("[dim]Initializing knowledge graph and LLM...[/dim]")
+
+    try:
+        llm = get_llm_backend(backend=backend, model=model)
+    except Exception as e:
+        console.print(f"[red]Error initializing LLM backend ({backend}):[/red] {e}")
+        if backend == "ollama":
+            console.print("[dim]Make sure Ollama is running: ollama serve[/dim]")
+        elif backend == "openai":
+            console.print("[dim]Make sure OPENAI_API_KEY is set[/dim]")
+        raise typer.Exit(1)
+
+    hybrid = HybridQueryEngine(graph_dir, vector_dir)
+    analyzer = AttackAnalyzer(hybrid, llm)
+
+    # Run analysis
+    console.print("[dim]Analyzing finding...[/dim]\n")
+
+    try:
+        result = analyzer.analyze(finding_text, top_k=top_k)
+    except Exception as e:
+        console.print(f"[red]Analysis error:[/red] {e}")
+        raise typer.Exit(1)
+
+    # Output
+    if output_json:
+        console.print(json.dumps(result.to_dict(), indent=2))
+    else:
+        print_analysis_result(result)
+
+
+@app.command()
 def repl(
     graph_dir: Path = typer.Option(DEFAULT_GRAPH_DIR, help="Oxigraph store directory"),
     vector_dir: Path = typer.Option(DEFAULT_VECTOR_DIR, help="ChromaDB store directory"),
