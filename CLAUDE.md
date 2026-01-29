@@ -17,6 +17,7 @@ uv run attack-kg build       # Load into Oxigraph + build ChromaDB vectors
 uv run attack-kg technique T1110.003    # Lookup technique
 uv run attack-kg group APT29            # Group techniques
 uv run attack-kg search "credential theft"  # Semantic search
+uv run attack-kg analyze "password spraying against Azure AD"  # Remediation suggestions
 uv run attack-kg query "SELECT ..."     # Raw SPARQL
 uv run attack-kg repl                   # Interactive mode
 
