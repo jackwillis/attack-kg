@@ -336,12 +336,19 @@ def repl(
     backend: str = typer.Option("ollama", "--backend", "-b", help="LLM backend: ollama or openai"),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name override"),
 ):
-    """Start an interactive query session."""
+    """Start an interactive graph browser session."""
     import atexit
     import readline
 
     from src.store.graph import AttackGraph
     from src.query.semantic import SemanticSearchEngine
+    from src.query.hybrid import HybridQueryEngine
+    from src.cli.browser import GraphBrowser
+    from src.cli.presenter import (
+        present_entity,
+        present_connections,
+        present_search_results,
+    )
 
     # Set up readline history
     history_file = Path.home() / ".attack_kg_history"
@@ -353,7 +360,10 @@ def repl(
     atexit.register(readline.write_history_file, history_file)
 
     # Set up tab completion
-    commands = ["sparql", "search", "tech", "group", "analyze", "quit", "exit", "help"]
+    commands = [
+        "search", "cd", "back", "pwd", "ls", "info", "ask",
+        "sparql", "tech", "group", "analyze", "quit", "exit", "help",
+    ]
 
     def completer(text: str, state: int) -> str | None:
         options = [cmd for cmd in commands if cmd.startswith(text)]
@@ -362,48 +372,96 @@ def repl(
     readline.set_completer(completer)
     readline.parse_and_bind("tab: complete")
 
+    # Initialize components
     graph = AttackGraph(graph_dir)
     semantic = SemanticSearchEngine(vector_dir)
+    hybrid = HybridQueryEngine(graph=graph, semantic=semantic)
+    browser = GraphBrowser(graph, hybrid)
 
-    # Lazy-loaded analyzer components
-    analyzer = None
+    # Lazy-loaded LLM for ask command
+    _llm = None
 
-    def get_analyzer():
-        nonlocal analyzer
-        if analyzer is None:
-            from src.query.hybrid import HybridQueryEngine
+    def get_llm():
+        nonlocal _llm
+        if _llm is None:
             from src.reasoning.llm import get_llm_backend
-            from src.reasoning.analyzer import AttackAnalyzer
-
             console.print("[dim]Initializing LLM...[/dim]")
             try:
-                llm = get_llm_backend(backend=backend, model=model)
-                hybrid = HybridQueryEngine(graph=graph, semantic=semantic)
-                analyzer = AttackAnalyzer(hybrid, llm)
+                _llm = get_llm_backend(backend=backend, model=model)
             except Exception as e:
-                console.print(f"[red]Error initializing analyzer:[/red] {e}")
+                console.print(f"[red]Error initializing LLM:[/red] {e}")
                 if backend == "ollama":
                     console.print("[dim]Make sure Ollama is running: ollama serve[/dim]")
                 return None
-        return analyzer
+        return _llm
 
-    console.print(Panel(
-        "Commands:\n"
-        "  sparql <query>     - Execute SPARQL query\n"
-        "  search <text>      - Semantic search\n"
-        "  tech <id>          - Get technique details\n"
-        "  group <name>       - Get group techniques\n"
-        "  analyze <text>     - Analyze finding for techniques & remediation\n"
-        "  analyze @<file>    - Analyze finding from file\n"
-        "  quit               - Exit\n"
-        "\n"
-        "Tab completion and command history enabled.",
-        title="ATT&CK Knowledge Graph REPL",
-    ))
+    # Lazy-loaded analyzer
+    _analyzer = None
+
+    def get_analyzer():
+        nonlocal _analyzer
+        if _analyzer is None:
+            from src.reasoning.analyzer import AttackAnalyzer
+            llm = get_llm()
+            if llm:
+                _analyzer = AttackAnalyzer(hybrid, llm)
+        return _analyzer
+
+    def show_help():
+        console.print(Panel(
+            "[bold]Navigation:[/bold]\n"
+            "  search <text>      - Find entities across all types\n"
+            "  cd <id>            - Navigate to entity (T1110, G0016, S0154, etc.)\n"
+            "  cd .. / back       - Return to previous entity\n"
+            "  pwd                - Show current location\n"
+            "  ls                 - Show connections from current entity\n"
+            "  info               - Show full details of current entity\n"
+            "\n"
+            "[bold]LLM Queries:[/bold]\n"
+            "  ask <question>     - Ask a question in context of current entity\n"
+            "  analyze <text>     - Analyze finding for techniques & remediation\n"
+            "  analyze @<file>    - Analyze finding from file\n"
+            "\n"
+            "[bold]Advanced:[/bold]\n"
+            "  sparql <query>     - Execute raw SPARQL query\n"
+            "  tech <id>          - Quick technique lookup\n"
+            "  group <name>       - Quick group lookup\n"
+            "\n"
+            "[bold]Other:[/bold]\n"
+            "  help               - Show this help\n"
+            "  quit               - Exit\n"
+            "\n"
+            "[dim]Tab completion and command history enabled.[/dim]",
+            title="ATT&CK Graph Browser",
+        ))
+
+    def show_root_info():
+        """Show info when at root."""
+        summary = browser._get_root_summary()
+        stats = summary.get("summary", {})
+        console.print("\n[bold]ATT&CK Knowledge Graph[/bold]")
+        console.print("━" * 40)
+        console.print(f"  Techniques:    {stats.get('techniques', 0):,}")
+        console.print(f"  Groups:        {stats.get('groups', 0):,}")
+        console.print(f"  Software:      {stats.get('software', 0):,}")
+        console.print(f"  Mitigations:   {stats.get('mitigations', 0):,}")
+        console.print(f"  Campaigns:     {stats.get('campaigns', 0):,}")
+        console.print(f"  Tactics:       {stats.get('tactics', 0):,}")
+        console.print(f"  Data Sources:  {stats.get('data_sources', 0):,}")
+        console.print(f"\n  [dim]Total triples: {stats.get('total_triples', 0):,}[/dim]")
+        console.print(f"\n[dim]Use 'search <text>' to find entities or 'cd <ID>' to navigate[/dim]")
+
+    def get_prompt() -> str:
+        """Get the current prompt based on browser state."""
+        path = browser.pwd()
+        return f"[bold green]{path}>[/bold green] "
+
+    # Show initial help
+    show_help()
 
     while True:
         try:
-            user_input = console.input("[bold green]attack-kg>[/bold green] ").strip()
+            user_input = console.input(get_prompt()).strip()
         except (EOFError, KeyboardInterrupt):
             break
 
@@ -414,48 +472,125 @@ def repl(
         cmd = parts[0].lower()
         arg = parts[1] if len(parts) > 1 else ""
 
+        # Navigation commands
         if cmd in ("quit", "exit", "q"):
             break
+
+        elif cmd == "help":
+            show_help()
+
+        elif cmd == "pwd":
+            console.print(f"\n[bold]Location:[/bold] {browser.breadcrumb()}")
+
+        elif cmd == "cd":
+            if not arg:
+                console.print("[yellow]Usage: cd <entity_id> or cd ..[/yellow]")
+                continue
+
+            success, entity = browser.cd(arg)
+            if success:
+                if browser.at_root:
+                    show_root_info()
+                elif entity:
+                    present_entity(entity, browser.current_type)
+            else:
+                console.print(f"[yellow]Entity not found: {arg}[/yellow]")
+
+        elif cmd == "back":
+            success, entity = browser.back()
+            if success:
+                if browser.at_root:
+                    show_root_info()
+                elif entity:
+                    present_entity(entity, browser.current_type)
+            else:
+                console.print("[dim]Already at root[/dim]")
+
+        elif cmd == "ls":
+            if browser.at_root:
+                show_root_info()
+            else:
+                relationships = browser.ls()
+                if relationships:
+                    present_connections(relationships, browser.current_type, browser.current_name)
+
+        elif cmd == "info":
+            if browser.at_root:
+                show_root_info()
+            else:
+                entity = browser.info()
+                if entity:
+                    present_entity(entity, browser.current_type, full=True)
+                    # Also show connections summary
+                    relationships = browser.ls()
+                    if relationships:
+                        present_connections(relationships, browser.current_type, browser.current_name)
+
+        elif cmd == "search":
+            if not arg:
+                console.print("[yellow]Usage: search <query>[/yellow]")
+                continue
+
+            console.print(f"\n[dim]Searching for: '{arg}'...[/dim]")
+            results = browser.search(arg)
+            present_search_results(results)
+
+        elif cmd == "ask":
+            if not arg:
+                console.print("[yellow]Usage: ask <question>[/yellow]")
+                continue
+
+            llm = get_llm()
+            if llm:
+                console.print("[dim]Thinking...[/dim]")
+                response = browser.ask(arg, llm)
+                console.print(f"\n{response}")
+
+        # Legacy/advanced commands
         elif cmd == "sparql" and arg:
             try:
                 graph.print_query_results(arg)
             except Exception as e:
                 console.print(f"[red]Query error:[/red] {e}")
-        elif cmd == "search" and arg:
-            from rich.table import Table
-            results = semantic.search(arg, top_k=5)
-            if results:
-                table = Table(title=f"Techniques similar to: '{arg}'")
-                table.add_column("ID", style="cyan")
-                table.add_column("Name", style="green")
-                table.add_column("Tactics")
-                table.add_column("Similarity", justify="right")
-                for r in results:
-                    table.add_row(r.attack_id, r.name, ", ".join(r.tactics), f"{r.similarity:.3f}")
-                console.print(table)
-            else:
-                console.print("[yellow]No results found[/yellow]")
-        elif cmd == "tech" and arg:
-            tech = graph.get_technique(arg)
-            if tech:
-                console.print(f"\n[bold]{tech['name']}[/bold] ({arg})")
-                console.print(tech['description'][:500] + "..." if len(tech['description']) > 500 else tech['description'])
+
+        elif cmd == "tech":
+            if not arg:
+                console.print("[yellow]Usage: tech <technique_id>[/yellow]")
+                continue
+            # Navigate to the technique
+            success, entity = browser.cd(arg)
+            if success and entity:
+                present_entity(entity, browser.current_type, full=True)
             else:
                 console.print(f"[yellow]Technique not found: {arg}[/yellow]")
-        elif cmd == "group" and arg:
-            if not arg.startswith("G"):
+
+        elif cmd == "group":
+            if not arg:
+                console.print("[yellow]Usage: group <name_or_id>[/yellow]")
+                continue
+            # Try to find and navigate to the group
+            if not arg.upper().startswith("G"):
                 matches = graph.find_group_by_name(arg)
                 if matches:
                     arg = matches[0]["attack_id"]
-            techniques = graph.get_techniques_for_group(arg)
-            if techniques:
-                for t in techniques[:10]:
-                    console.print(f"  • {t['name']} ({t['attack_id']})")
-                if len(techniques) > 10:
-                    console.print(f"  ... and {len(techniques) - 10} more")
+                else:
+                    console.print(f"[yellow]Group not found: {arg}[/yellow]")
+                    continue
+
+            success, entity = browser.cd(arg)
+            if success and entity:
+                present_entity(entity, browser.current_type)
+                relationships = browser.ls()
+                if relationships:
+                    present_connections(relationships, browser.current_type, browser.current_name)
             else:
-                console.print(f"[yellow]No techniques found for: {arg}[/yellow]")
-        elif cmd == "analyze" and arg:
+                console.print(f"[yellow]Group not found: {arg}[/yellow]")
+
+        elif cmd == "analyze":
+            if not arg:
+                console.print("[yellow]Usage: analyze <finding_text> or analyze @<file>[/yellow]")
+                continue
+
             from src.reasoning.analyzer import print_analysis_result
 
             # Support @filename to read from file
@@ -477,8 +612,9 @@ def repl(
                     print_analysis_result(result)
                 except Exception as e:
                     console.print(f"[red]Analysis error:[/red] {e}")
+
         else:
-            console.print("[yellow]Unknown command. Try: sparql, search, tech, group, analyze, quit[/yellow]")
+            console.print(f"[yellow]Unknown command: {cmd}. Type 'help' for available commands.[/yellow]")
 
     console.print("\n[dim]Goodbye![/dim]")
 

@@ -17,19 +17,30 @@ uv run attack-kg build       # Load into Oxigraph + build ChromaDB vectors
 uv run attack-kg technique T1110.003    # Lookup technique
 uv run attack-kg group APT29            # Group techniques
 uv run attack-kg search "credential theft"  # Semantic search
-uv run attack-kg analyze "password spraying against Azure AD"  # Remediation suggestions
+uv run attack-kg analyze "password spraying against Azure AD"  # Full analysis with remediation
 uv run attack-kg analyze --file finding.txt  # Analyze from file
 uv run attack-kg query "SELECT ..."     # Raw SPARQL
 uv run attack-kg repl                   # Interactive mode
 uv run attack-kg repl --model gpt-oss:20b   # REPL with specific model
 
-# REPL commands (supports readline history + tab completion)
-# sparql <query>   - Execute SPARQL query
-# search <text>    - Semantic search
-# tech <id>        - Get technique details
-# group <name>     - Get group techniques
-# analyze <text>   - Analyze finding for techniques & remediation
-# analyze @<file>  - Analyze finding from file
+# Graph Browser REPL commands (supports readline history + tab completion)
+# Navigation:
+#   search <text>    - Find entities across all types (techniques, groups, software, etc.)
+#   cd <id>          - Navigate to entity (T1110, G0016, S0154, M1032, C0024, etc.)
+#   cd .. / back     - Return to previous entity
+#   pwd              - Show current location with breadcrumb trail
+#   ls               - Show connections from current entity
+#   info             - Show full details of current entity
+#
+# LLM Queries:
+#   ask <question>   - Ask LLM about current entity in context
+#   analyze <text>   - Analyze finding for techniques & remediation
+#   analyze @<file>  - Analyze finding from file
+#
+# Advanced:
+#   sparql <query>   - Execute raw SPARQL query
+#   tech <id>        - Quick technique lookup (navigates + shows info)
+#   group <name>     - Quick group lookup (navigates + shows connections)
 
 # Environment variables
 # OLLAMA_HOST      - Ollama server URL (default: http://localhost:11434)
@@ -52,6 +63,12 @@ STIX JSON → StixToRdfConverter → N-Triples → Oxigraph (SPARQL)
 ```
 
 ### Key Components
+
+- **`src/main.py`** - Main CLI application (Typer commands: download, ingest, build, repl, etc.)
+
+- **`src/cli/browser.py`** - `GraphBrowser` provides filesystem-like navigation through the knowledge graph (cd, ls, pwd, back)
+
+- **`src/cli/presenter.py`** - Rich formatted output for each entity type (techniques, groups, software, etc.)
 
 - **`src/store/graph.py`** - `AttackGraph` wraps pyoxigraph directly (not oxrdflib, which had hanging issues). Provides SPARQL queries and convenience methods for ATT&CK lookups.
 

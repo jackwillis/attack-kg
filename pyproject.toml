@@ -36,7 +36,7 @@ dev = [
 ]
 
 [project.scripts]
-attack-kg = "src.cli:app"
+attack-kg = "src.main:app"
 
 [build-system]
 requires = ["hatchling"]
