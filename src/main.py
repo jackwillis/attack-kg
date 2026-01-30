@@ -455,7 +455,7 @@ def repl(
         """Get the current prompt based on browser state."""
         path = browser.pwd()
         # Use plain text for readline compatibility
-        return f"{path}> "
+        return f"\n{path}> "
 
     # Show initial help
     show_help()
