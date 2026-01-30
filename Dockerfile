@@ -56,6 +56,7 @@ COPY --from=builder /app/src /app/src
 
 # Force offline mode - use only cached models, no runtime downloads
 ENV HF_HUB_OFFLINE=1
+ENV ATTACK_KG_OFFLINE=1
 
 ENTRYPOINT ["uv", "run", "attack-kg"]
 CMD ["--help"]
