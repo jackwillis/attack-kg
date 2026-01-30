@@ -83,6 +83,18 @@ class StixToRdfConverter:
                 self._process_relationship(rel)
                 progress.advance(task)
 
+        # Post-processing: Link detection strategies to analytics
+        if hasattr(self, '_pending_analytic_links'):
+            g = self.graph
+            linked = 0
+            for detection_uri, analytic_ref in self._pending_analytic_links:
+                analytic_uri = self.stix_to_uri.get(analytic_ref)
+                if analytic_uri:
+                    g.add((detection_uri, ATTACK.hasAnalytic, analytic_uri))
+                    linked += 1
+            if linked > 0:
+                console.print(f"[green]Linked {linked} detection strategies to analytics[/green]")
+
         console.print(f"[green]Created {len(self.graph)} triples[/green]")
         return self.graph
 
@@ -115,6 +127,9 @@ class StixToRdfConverter:
             "x-mitre-tactic": self._process_tactic,
             "x-mitre-data-source": self._process_data_source,
             "x-mitre-data-component": self._process_data_component,
+            "campaign": self._process_campaign,
+            "x-mitre-analytic": self._process_analytic,
+            "x-mitre-detection-strategy": self._process_detection_strategy,
             "identity": self._process_identity,
             "marking-definition": None,  # Skip marking definitions
             "x-mitre-matrix": None,  # Skip matrix definitions
@@ -175,6 +190,19 @@ class StixToRdfConverter:
         if url:
             g.add((uri, ATTACK.url, Literal(url, datatype=XSD.anyURI)))
 
+        # Version info
+        if "x_mitre_version" in obj:
+            g.add((uri, ATTACK.version, Literal(obj["x_mitre_version"])))
+
+        # Domain (enterprise-attack, mobile-attack, ics-attack)
+        for domain in obj.get("x_mitre_domains", []):
+            g.add((uri, ATTACK.domain, Literal(domain)))
+
+        # External references (for citations)
+        for ref in obj.get("external_references", []):
+            if ref.get("source_name") != "mitre-attack" and ref.get("url"):
+                g.add((uri, ATTACK.reference, Literal(ref.get("url"), datatype=XSD.anyURI)))
+
     def _process_group(self, obj: dict[str, Any]) -> None:
         """Convert intrusion-set (Threat Group) to RDF."""
         attack_id = self._get_attack_id(obj)
@@ -196,6 +224,15 @@ class StixToRdfConverter:
         # Aliases
         for alias in obj.get("aliases", []):
             g.add((uri, ATTACK.alias, Literal(alias)))
+
+        # Contributors
+        for contributor in obj.get("x_mitre_contributors", []):
+            g.add((uri, ATTACK.contributor, Literal(contributor)))
+
+        # URL to ATT&CK website
+        url = self._get_attack_url(obj)
+        if url:
+            g.add((uri, ATTACK.url, Literal(url, datatype=XSD.anyURI)))
 
     def _process_malware(self, obj: dict[str, Any]) -> None:
         """Convert malware to RDF."""
@@ -222,6 +259,11 @@ class StixToRdfConverter:
         for alias in obj.get("x_mitre_aliases", []):
             g.add((uri, ATTACK.alias, Literal(alias)))
 
+        # URL to ATT&CK website
+        url = self._get_attack_url(obj)
+        if url:
+            g.add((uri, ATTACK.url, Literal(url, datatype=XSD.anyURI)))
+
     def _process_tool(self, obj: dict[str, Any]) -> None:
         """Convert tool to RDF."""
         attack_id = self._get_attack_id(obj)
@@ -247,6 +289,11 @@ class StixToRdfConverter:
         for alias in obj.get("x_mitre_aliases", []):
             g.add((uri, ATTACK.alias, Literal(alias)))
 
+        # URL to ATT&CK website
+        url = self._get_attack_url(obj)
+        if url:
+            g.add((uri, ATTACK.url, Literal(url, datatype=XSD.anyURI)))
+
     def _process_mitigation(self, obj: dict[str, Any]) -> None:
         """Convert course-of-action (Mitigation) to RDF."""
         attack_id = self._get_attack_id(obj)
@@ -264,6 +311,11 @@ class StixToRdfConverter:
 
         if "description" in obj:
             g.add((uri, ATTACK.description, Literal(obj["description"])))
+
+        # URL to ATT&CK website
+        url = self._get_attack_url(obj)
+        if url:
+            g.add((uri, ATTACK.url, Literal(url, datatype=XSD.anyURI)))
 
     def _process_tactic(self, obj: dict[str, Any]) -> None:
         """Convert x-mitre-tactic to RDF."""
@@ -330,6 +382,93 @@ class StixToRdfConverter:
         uri = STIX[f"identity/{obj['id']}"]
         self.stix_to_uri[obj["id"]] = uri
 
+    def _process_campaign(self, obj: dict[str, Any]) -> None:
+        """Convert campaign to RDF."""
+        attack_id = self._get_attack_id(obj)
+        if not attack_id:
+            return
+
+        uri = ATTACK[f"campaign/{attack_id}"]
+        self.stix_to_uri[obj["id"]] = uri
+
+        g = self.graph
+        g.add((uri, RDF.type, ATTACK.Campaign))
+        g.add((uri, ATTACK.attackId, Literal(attack_id)))
+        g.add((uri, ATTACK.stixId, Literal(obj["id"])))
+        g.add((uri, RDFS.label, Literal(obj["name"])))
+
+        if "description" in obj:
+            g.add((uri, ATTACK.description, Literal(obj["description"])))
+
+        # Campaign time bounds
+        if "first_seen" in obj:
+            g.add((uri, ATTACK.firstSeen, Literal(obj["first_seen"], datatype=XSD.dateTime)))
+        if "last_seen" in obj:
+            g.add((uri, ATTACK.lastSeen, Literal(obj["last_seen"], datatype=XSD.dateTime)))
+
+        # Aliases
+        for alias in obj.get("aliases", []):
+            g.add((uri, ATTACK.alias, Literal(alias)))
+
+        # URL to ATT&CK website
+        url = self._get_attack_url(obj)
+        if url:
+            g.add((uri, ATTACK.url, Literal(url, datatype=XSD.anyURI)))
+
+    def _process_analytic(self, obj: dict[str, Any]) -> None:
+        """Convert x-mitre-analytic to RDF."""
+        attack_id = self._get_attack_id(obj)
+        if not attack_id:
+            # Use STIX ID as fallback
+            attack_id = obj["id"].split("--")[1][:8]
+
+        uri = ATTACK[f"analytic/{attack_id}"]
+        self.stix_to_uri[obj["id"]] = uri
+
+        g = self.graph
+        g.add((uri, RDF.type, ATTACK.Analytic))
+        g.add((uri, ATTACK.attackId, Literal(attack_id)))
+        g.add((uri, ATTACK.stixId, Literal(obj["id"])))
+        g.add((uri, RDFS.label, Literal(obj["name"])))
+
+        if "description" in obj:
+            g.add((uri, ATTACK.description, Literal(obj["description"])))
+
+        # Platforms
+        for platform in obj.get("x_mitre_platforms", []):
+            g.add((uri, ATTACK.platform, Literal(platform)))
+
+        # Log source references (for detection)
+        for log_ref in obj.get("x_mitre_log_source_references", []):
+            if "name" in log_ref:
+                g.add((uri, ATTACK.logSource, Literal(log_ref["name"])))
+            if "channel" in log_ref:
+                g.add((uri, ATTACK.logChannel, Literal(log_ref["channel"])))
+
+    def _process_detection_strategy(self, obj: dict[str, Any]) -> None:
+        """Convert x-mitre-detection-strategy to RDF."""
+        attack_id = self._get_attack_id(obj)
+        if not attack_id:
+            return
+
+        uri = ATTACK[f"detection/{attack_id}"]
+        self.stix_to_uri[obj["id"]] = uri
+
+        g = self.graph
+        g.add((uri, RDF.type, ATTACK.DetectionStrategy))
+        g.add((uri, ATTACK.attackId, Literal(attack_id)))
+        g.add((uri, ATTACK.stixId, Literal(obj["id"])))
+        g.add((uri, RDFS.label, Literal(obj["name"])))
+
+        if "description" in obj:
+            g.add((uri, ATTACK.description, Literal(obj["description"])))
+
+        # Store analytic refs for post-processing (analytics may not be processed yet)
+        if not hasattr(self, '_pending_analytic_links'):
+            self._pending_analytic_links = []
+        for analytic_ref in obj.get("x_mitre_analytic_refs", []):
+            self._pending_analytic_links.append((uri, analytic_ref))
+
     def _process_relationship(self, rel: dict[str, Any]) -> None:
         """Convert STIX relationship to RDF predicate."""
         source_id = rel.get("source_ref")
@@ -366,6 +505,14 @@ class StixToRdfConverter:
             # For "mitigates", add inverse
             if rel_type == "mitigates":
                 self.graph.add((target_uri, ATTACK.mitigatedBy, source_uri))
+
+            # For "detects", add inverse (technique is detected by)
+            if rel_type == "detects":
+                self.graph.add((target_uri, ATTACK.detectedBy, source_uri))
+
+            # For "attributed-to", add inverse (group has campaign)
+            if rel_type == "attributed-to":
+                self.graph.add((target_uri, ATTACK.hasCampaign, source_uri))
 
     def save(self, path: Path | str, format: str = "turtle") -> None:
         """

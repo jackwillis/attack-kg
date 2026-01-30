@@ -35,12 +35,23 @@ class RemediationItem:
 
 
 @dataclass
+class DetectionRecommendation:
+    """A detection recommendation based on data sources."""
+
+    data_source: str
+    rationale: str
+    techniques_covered: list[str]
+
+
+@dataclass
 class AnalysisResult:
     """Complete analysis result."""
 
     finding: str
     techniques: list[TechniqueMatch]
     remediations: list[RemediationItem]
+    detection_recommendations: list[DetectionRecommendation] = field(default_factory=list)
+    kill_chain_analysis: str = ""
     raw_llm_response: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -67,6 +78,15 @@ class AnalysisResult:
                 }
                 for r in self.remediations
             ],
+            "detection_recommendations": [
+                {
+                    "data_source": d.data_source,
+                    "rationale": d.rationale,
+                    "techniques_covered": d.techniques_covered,
+                }
+                for d in self.detection_recommendations
+            ],
+            "kill_chain_analysis": self.kill_chain_analysis,
         }
 
 
@@ -77,11 +97,17 @@ Your task is to analyze attack narratives and identify which ATT&CK techniques a
 You will be given:
 1. An attack narrative or security finding
 2. A list of candidate techniques with their descriptions from the ATT&CK knowledge base
+3. Context including: platforms targeted, threat groups known to use each technique, campaigns that have used them, and data sources for detection
 
 For each relevant technique, provide:
 - Confidence level (high/medium/low) based on how clearly the technique is evidenced
 - Specific evidence from the narrative that maps to this technique
 - The technique's associated tactics
+
+Consider the additional context:
+- If the narrative mentions specific platforms, prioritize techniques targeting those platforms
+- If threat actors or campaigns are mentioned, check if they align with known groups using the techniques
+- Note which data sources would help detect the identified techniques
 
 Be conservative: only identify techniques with clear evidence. Do not speculate.
 
@@ -93,9 +119,12 @@ Output JSON with this structure:
             "name": "Password Spraying",
             "confidence": "high",
             "evidence": "The narrative explicitly mentions password spraying",
-            "tactics": ["Credential Access"]
+            "tactics": ["Credential Access"],
+            "relevant_groups": ["APT29", "Scattered Spider"],
+            "detection_data_sources": ["Authentication logs", "Active Directory"]
         }
     ],
+    "kill_chain_analysis": "Brief description of where this fits in the attack lifecycle",
     "reasoning": "Brief explanation of the overall analysis"
 }"""
 
@@ -107,6 +136,8 @@ Consider:
 1. Mitigations that address multiple identified techniques should be higher priority
 2. Mitigations with lower implementation complexity are preferable when equally effective
 3. Provide specific, actionable implementation guidance
+4. Consider detection capabilities - recommend data sources to collect for ongoing monitoring
+5. If threat groups are identified, consider their known TTPs for additional hardening
 
 Output JSON with this structure:
 {
@@ -117,6 +148,13 @@ Output JSON with this structure:
             "priority": "HIGH",
             "addresses": ["T1110.003", "T1078.004"],
             "implementation": "Enable MFA for all Azure AD accounts. Configure conditional access policies..."
+        }
+    ],
+    "detection_recommendations": [
+        {
+            "data_source": "Authentication Logs",
+            "rationale": "Monitor for multiple failed authentication attempts indicating password spraying",
+            "techniques_covered": ["T1110.003"]
         }
     ],
     "summary": "Brief summary of the remediation strategy"
@@ -174,34 +212,79 @@ class AttackAnalyzer:
             hybrid_result.techniques, classification
         )
 
-        # Step 5: Get remediation recommendations
-        remediations = self._get_remediations(
+        # Step 5: Get remediation and detection recommendations
+        remediations, detection_recs = self._get_remediations(
             finding_text, classification, mitigation_context
         )
 
         # Step 6: Enrich with group information
         techniques = self._enrich_with_groups(classification, hybrid_result.techniques)
 
+        # Extract kill chain analysis from classification
+        kill_chain_analysis = classification.get("kill_chain_analysis", "")
+
         return AnalysisResult(
             finding=finding_text,
             techniques=techniques,
             remediations=remediations,
+            detection_recommendations=detection_recs,
+            kill_chain_analysis=kill_chain_analysis,
             raw_llm_response={
                 "classification": classification,
-                "remediation_response": remediations,
             },
         )
 
     def _build_candidates_context(self, techniques) -> str:
-        """Build a context string describing candidate techniques."""
+        """Build a context string describing candidate techniques with full enriched data."""
         context_parts = []
         for tech in techniques:
-            desc = tech.description[:300] + "..." if len(tech.description) > 300 else tech.description
-            context_parts.append(
-                f"- {tech.attack_id} ({tech.name}): {desc}\n"
-                f"  Tactics: {', '.join(tech.tactics)}\n"
-                f"  Similarity score: {tech.similarity:.2f}"
-            )
+            desc = tech.description[:400] + "..." if len(tech.description) > 400 else tech.description
+
+            parts = [
+                f"- {tech.attack_id} ({tech.name})",
+                f"  Description: {desc}",
+                f"  Tactics: {', '.join(tech.tactics)}",
+                f"  Similarity score: {tech.similarity:.2f}",
+            ]
+
+            # Add platforms if available
+            if tech.platforms:
+                parts.append(f"  Platforms: {', '.join(tech.platforms)}")
+
+            # Add data sources for detection
+            if tech.data_sources:
+                ds_list = tech.data_sources[:5]  # Limit to top 5
+                parts.append(f"  Detection Data Sources: {', '.join(ds_list)}")
+
+            # Add detection guidance if available
+            if tech.detection:
+                det_preview = tech.detection[:200] + "..." if len(tech.detection) > 200 else tech.detection
+                parts.append(f"  Detection Guidance: {det_preview}")
+
+            # Add groups using this technique
+            if tech.groups:
+                group_names = [g.get("name", g.get("attack_id", "")) for g in tech.groups[:5]]
+                parts.append(f"  Known Threat Groups: {', '.join(group_names)}")
+
+            # Add campaigns using this technique
+            if tech.campaigns:
+                campaign_names = [c.get("name", c.get("attack_id", "")) for c in tech.campaigns[:3]]
+                parts.append(f"  Used in Campaigns: {', '.join(campaign_names)}")
+
+            # Add software using this technique
+            if tech.software:
+                software_names = [s.get("name", "") for s in tech.software[:5]]
+                parts.append(f"  Associated Software: {', '.join(software_names)}")
+
+            # Add parent/sub-technique relationships
+            if tech.parent_technique:
+                parts.append(f"  Parent Technique: {tech.parent_technique['attack_id']} ({tech.parent_technique['name']})")
+            if tech.subtechniques:
+                sub_names = [f"{s['attack_id']}" for s in tech.subtechniques[:3]]
+                parts.append(f"  Sub-techniques: {', '.join(sub_names)}")
+
+            context_parts.append("\n".join(parts))
+
         return "\n\n".join(context_parts)
 
     def _classify_techniques(
@@ -223,7 +306,7 @@ Only include techniques with clear supporting evidence from the narrative."""
     def _build_mitigation_context(
         self, techniques, classification: dict[str, Any]
     ) -> str:
-        """Build context about available mitigations."""
+        """Build context about available mitigations and detection data sources."""
         # Get IDs of classified techniques
         classified_ids = {
             t.get("attack_id") for t in classification.get("techniques", [])
@@ -231,8 +314,11 @@ Only include techniques with clear supporting evidence from the narrative."""
 
         # Gather mitigations for classified techniques
         mitigations_by_id = {}
+        data_sources_by_technique = {}
+
         for tech in techniques:
             if tech.attack_id in classified_ids:
+                # Collect mitigations
                 for mit in tech.mitigations:
                     if mit["attack_id"] not in mitigations_by_id:
                         mitigations_by_id[mit["attack_id"]] = {
@@ -244,40 +330,52 @@ Only include techniques with clear supporting evidence from the narrative."""
                             tech.attack_id
                         )
 
-        # Format context
-        context_parts = []
+                # Collect data sources for detection
+                if tech.data_sources:
+                    data_sources_by_technique[tech.attack_id] = tech.data_sources
+
+        # Format mitigation context
+        context_parts = ["AVAILABLE MITIGATIONS:"]
         for mit_id, mit in mitigations_by_id.items():
             context_parts.append(
                 f"- {mit_id} ({mit['name']})\n"
                 f"  Addresses: {', '.join(mit['addresses'])}"
             )
 
-        return "\n".join(context_parts) if context_parts else "No specific mitigations found in knowledge base."
+        if not mitigations_by_id:
+            context_parts.append("No specific mitigations found in knowledge base.")
+
+        # Add data sources for detection
+        if data_sources_by_technique:
+            context_parts.append("\nDETECTION DATA SOURCES:")
+            for tech_id, sources in data_sources_by_technique.items():
+                context_parts.append(f"- {tech_id}: {', '.join(sources[:5])}")
+
+        return "\n".join(context_parts)
 
     def _get_remediations(
         self,
         finding_text: str,
         classification: dict[str, Any],
         mitigation_context: str,
-    ) -> list[RemediationItem]:
-        """Get prioritized remediation recommendations from LLM."""
+    ) -> tuple[list[RemediationItem], list[DetectionRecommendation]]:
+        """Get prioritized remediation and detection recommendations from LLM."""
         techniques_summary = "\n".join(
             f"- {t['attack_id']} ({t['name']}): {t.get('evidence', 'N/A')}"
             for t in classification.get("techniques", [])
         )
 
         if not techniques_summary:
-            return []
+            return [], []
 
         prompt = f"""Finding: {finding_text}
 
 Identified Techniques:
 {techniques_summary}
 
-Available Mitigations from ATT&CK:
 {mitigation_context}
 
-Provide prioritized remediation recommendations."""
+Provide prioritized remediation and detection recommendations."""
 
         result = self.llm.generate_json(prompt, system=REMEDIATION_SYSTEM_PROMPT)
 
@@ -292,7 +390,18 @@ Provide prioritized remediation recommendations."""
                     implementation=r.get("implementation", ""),
                 )
             )
-        return remediations
+
+        detection_recs = []
+        for d in result.get("detection_recommendations", []):
+            detection_recs.append(
+                DetectionRecommendation(
+                    data_source=d.get("data_source", ""),
+                    rationale=d.get("rationale", ""),
+                    techniques_covered=d.get("techniques_covered", []),
+                )
+            )
+
+        return remediations, detection_recs
 
     def _enrich_with_groups(
         self, classification: dict[str, Any], techniques
@@ -361,6 +470,12 @@ def print_analysis_result(result: AnalysisResult) -> None:
     else:
         console.print("\n[yellow]No techniques identified with confidence.[/yellow]\n")
 
+    # Kill chain analysis
+    if result.kill_chain_analysis:
+        console.print("[bold cyan]KILL CHAIN ANALYSIS[/bold cyan]")
+        console.print(f"  {result.kill_chain_analysis}")
+        console.print()
+
     # Remediation section
     if result.remediations:
         console.print("[bold cyan]RECOMMENDED REMEDIATION[/bold cyan]")
@@ -381,3 +496,15 @@ def print_analysis_result(result: AnalysisResult) -> None:
             console.print()
     else:
         console.print("[yellow]No specific remediations generated.[/yellow]\n")
+
+    # Detection recommendations
+    if result.detection_recommendations:
+        console.print("[bold cyan]DETECTION RECOMMENDATIONS[/bold cyan]")
+        console.print()
+
+        for det in result.detection_recommendations:
+            console.print(f"[bold]• {det.data_source}[/bold]")
+            console.print(f"   [dim]Rationale:[/dim] {det.rationale}")
+            if det.techniques_covered:
+                console.print(f"   [dim]Covers:[/dim] {', '.join(det.techniques_covered)}")
+            console.print()

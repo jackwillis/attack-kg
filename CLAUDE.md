@@ -61,6 +61,52 @@ STIX JSON → StixToRdfConverter → N-Triples → Oxigraph (SPARQL)
 
 - **`src/query/hybrid.py`** - `HybridQueryEngine` combines semantic search results with SPARQL graph enrichment.
 
+### Supported Entity Types
+
+The system processes these STIX entity types into the RDF graph:
+- **Techniques** (attack-pattern) - ~835 techniques with sub-techniques
+- **Groups** (intrusion-set) - ~187 threat groups with aliases
+- **Software** (malware, tool) - ~787 malware and tools
+- **Mitigations** (course-of-action) - ~268 defensive measures
+- **Campaigns** - ~52 attack campaigns with timelines
+- **Tactics** (x-mitre-tactic) - 14 kill chain phases
+- **Data Sources** (x-mitre-data-source) - ~38 detection data sources
+- **Data Components** (x-mitre-data-component) - ~109 detection components
+- **Detection Strategies** (x-mitre-detection-strategy) - ~691 detection approaches
+- **Analytics** (x-mitre-analytic) - ~1739 specific detection analytics
+
+### HybridQueryEngine Methods
+
+**Core Query Methods:**
+- `query(question, top_k, enrich)` - Semantic search with SPARQL enrichment
+- `find_defenses_for_finding(finding_text)` - Get techniques and mitigations for a finding
+- `get_threat_context(technique_id)` - Full context for a technique
+- `compare_groups(group1_id, group2_id)` - Compare two threat groups
+
+**Campaign Analysis:**
+- `get_campaign_context(campaign_id)` - Full campaign profile with techniques and group
+- `find_similar_campaigns(campaign_id)` - Find campaigns with similar TTPs
+
+**Detection & Data Sources:**
+- `get_detection_coverage(data_sources)` - Analyze what you can detect with available data
+- `find_by_data_source(data_source)` - Find techniques detectable by a data source
+
+**Platform & Kill Chain:**
+- `get_attack_surface(platforms)` - Techniques organized by tactic for specific platforms
+- `analyze_kill_chain(finding_text)` - Map finding across kill chain phases
+
+**Entity Profiles:**
+- `get_group_profile(group_id)` - Comprehensive group profile with TTPs and software
+- `get_software_profile(software_id)` - Full software profile with techniques and groups
+- `find_groups_by_technique_pattern(technique_ids)` - Find groups using specific techniques
+
+**Entity Search:**
+- `list_entities(entity_type)` - List all entities of a type
+- `search_entities(query, entity_types)` - Search across multiple entity types
+- `get_entity(attack_id)` - Get full details for any entity by ID
+- `get_relationships(attack_id)` - Get all relationships for an entity
+- `find_related_to_finding(finding_text)` - Find all related entities for a finding
+
 ## Technical Notes
 
 **SPARQL URI handling**: ATT&CK IDs containing dots (T1110.003) break SPARQL prefix notation. Always use full URIs:

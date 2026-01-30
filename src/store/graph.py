@@ -339,12 +339,18 @@ class AttackGraph:
             (COUNT(DISTINCT ?software) AS ?software)
             (COUNT(DISTINCT ?mitigation) AS ?mitigations)
             (COUNT(DISTINCT ?tactic) AS ?tactics)
+            (COUNT(DISTINCT ?campaign) AS ?campaigns)
+            (COUNT(DISTINCT ?datasource) AS ?datasources)
+            (COUNT(DISTINCT ?detection) AS ?detections)
         WHERE {
             { ?technique a attack:Technique }
             UNION { ?group a attack:Group }
             UNION { ?software a attack:Software }
             UNION { ?mitigation a attack:Mitigation }
             UNION { ?tactic a attack:Tactic }
+            UNION { ?campaign a attack:Campaign }
+            UNION { ?datasource a attack:DataSource }
+            UNION { ?detection a attack:DetectionStrategy }
         }
         """
         results = self.query(sparql)
@@ -355,6 +361,510 @@ class AttackGraph:
                 "software": int(results[0].get("software", 0)),
                 "mitigations": int(results[0].get("mitigations", 0)),
                 "tactics": int(results[0].get("tactics", 0)),
+                "campaigns": int(results[0].get("campaigns", 0)),
+                "data_sources": int(results[0].get("datasources", 0)),
+                "detection_strategies": int(results[0].get("detections", 0)),
                 "total_triples": len(self._store),
             }
         return {"total_triples": len(self._store)}
+
+    # -------------------------------------------------------------------------
+    # Campaign queries
+    # -------------------------------------------------------------------------
+
+    def get_campaign(self, attack_id: str) -> dict[str, Any] | None:
+        """Get a campaign by its ATT&CK ID (e.g., C0027)."""
+        camp_uri = f"<https://attack.mitre.org/campaign/{attack_id}>"
+        sparql = f"""
+        PREFIX attack: <https://attack.mitre.org/>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+        SELECT ?name ?description ?firstSeen ?lastSeen ?url WHERE {{
+            {camp_uri} rdfs:label ?name .
+            OPTIONAL {{ {camp_uri} attack:description ?description }}
+            OPTIONAL {{ {camp_uri} attack:firstSeen ?firstSeen }}
+            OPTIONAL {{ {camp_uri} attack:lastSeen ?lastSeen }}
+            OPTIONAL {{ {camp_uri} attack:url ?url }}
+        }}
+        """
+        results = self.query(sparql)
+        if results:
+            return {
+                "attack_id": attack_id,
+                "name": results[0].get("name", ""),
+                "description": results[0].get("description", ""),
+                "first_seen": results[0].get("firstSeen", ""),
+                "last_seen": results[0].get("lastSeen", ""),
+                "url": results[0].get("url", ""),
+            }
+        return None
+
+    def get_all_campaigns(self) -> list[dict[str, str]]:
+        """Get all campaigns."""
+        sparql = """
+        PREFIX attack: <https://attack.mitre.org/>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+        SELECT ?attackId ?name ?firstSeen ?lastSeen WHERE {
+            ?campaign a attack:Campaign ;
+                      attack:attackId ?attackId ;
+                      rdfs:label ?name .
+            OPTIONAL { ?campaign attack:firstSeen ?firstSeen }
+            OPTIONAL { ?campaign attack:lastSeen ?lastSeen }
+        }
+        ORDER BY ?attackId
+        """
+        return [
+            {
+                "attack_id": r["attackId"],
+                "name": r["name"],
+                "first_seen": r.get("firstSeen", ""),
+                "last_seen": r.get("lastSeen", ""),
+            }
+            for r in self.query(sparql)
+        ]
+
+    def get_campaigns_using_technique(self, attack_id: str) -> list[dict[str, str]]:
+        """Get campaigns that use a specific technique."""
+        tech_uri = f"<https://attack.mitre.org/technique/{attack_id}>"
+        sparql = f"""
+        PREFIX attack: <https://attack.mitre.org/>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+        SELECT ?attackId ?name ?firstSeen ?lastSeen WHERE {{
+            ?campaign a attack:Campaign ;
+                      attack:uses {tech_uri} ;
+                      attack:attackId ?attackId ;
+                      rdfs:label ?name .
+            OPTIONAL {{ ?campaign attack:firstSeen ?firstSeen }}
+            OPTIONAL {{ ?campaign attack:lastSeen ?lastSeen }}
+        }}
+        ORDER BY ?firstSeen
+        """
+        return [
+            {
+                "attack_id": r["attackId"],
+                "name": r["name"],
+                "first_seen": r.get("firstSeen", ""),
+                "last_seen": r.get("lastSeen", ""),
+            }
+            for r in self.query(sparql)
+        ]
+
+    def get_techniques_for_campaign(self, attack_id: str) -> list[dict[str, str]]:
+        """Get all techniques used in a campaign."""
+        camp_uri = f"<https://attack.mitre.org/campaign/{attack_id}>"
+        sparql = f"""
+        PREFIX attack: <https://attack.mitre.org/>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+        SELECT ?attackId ?name WHERE {{
+            {camp_uri} attack:uses ?technique .
+            ?technique a attack:Technique ;
+                       attack:attackId ?attackId ;
+                       rdfs:label ?name .
+        }}
+        ORDER BY ?attackId
+        """
+        return [{"attack_id": r["attackId"], "name": r["name"]} for r in self.query(sparql)]
+
+    def get_group_for_campaign(self, attack_id: str) -> dict[str, str] | None:
+        """Get the threat group attributed to a campaign."""
+        camp_uri = f"<https://attack.mitre.org/campaign/{attack_id}>"
+        sparql = f"""
+        PREFIX attack: <https://attack.mitre.org/>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+        SELECT ?attackId ?name WHERE {{
+            {camp_uri} attack:attributedTo ?group .
+            ?group a attack:Group ;
+                   attack:attackId ?attackId ;
+                   rdfs:label ?name .
+        }}
+        """
+        results = self.query(sparql)
+        if results:
+            return {"attack_id": results[0]["attackId"], "name": results[0]["name"]}
+        return None
+
+    def get_campaigns_for_group(self, group_id: str) -> list[dict[str, str]]:
+        """Get all campaigns attributed to a threat group."""
+        group_uri = f"<https://attack.mitre.org/group/{group_id}>"
+        sparql = f"""
+        PREFIX attack: <https://attack.mitre.org/>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+        SELECT ?attackId ?name ?firstSeen ?lastSeen WHERE {{
+            ?campaign attack:attributedTo {group_uri} ;
+                      attack:attackId ?attackId ;
+                      rdfs:label ?name .
+            OPTIONAL {{ ?campaign attack:firstSeen ?firstSeen }}
+            OPTIONAL {{ ?campaign attack:lastSeen ?lastSeen }}
+        }}
+        ORDER BY ?firstSeen
+        """
+        return [
+            {
+                "attack_id": r["attackId"],
+                "name": r["name"],
+                "first_seen": r.get("firstSeen", ""),
+                "last_seen": r.get("lastSeen", ""),
+            }
+            for r in self.query(sparql)
+        ]
+
+    # -------------------------------------------------------------------------
+    # Detection and data source queries
+    # -------------------------------------------------------------------------
+
+    def get_detection_strategies_for_technique(self, attack_id: str) -> list[dict[str, str]]:
+        """Get detection strategies for a specific technique."""
+        tech_uri = f"<https://attack.mitre.org/technique/{attack_id}>"
+        sparql = f"""
+        PREFIX attack: <https://attack.mitre.org/>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+        SELECT ?attackId ?name ?description WHERE {{
+            ?detection a attack:DetectionStrategy ;
+                       attack:detects {tech_uri} ;
+                       attack:attackId ?attackId ;
+                       rdfs:label ?name .
+            OPTIONAL {{ ?detection attack:description ?description }}
+        }}
+        ORDER BY ?attackId
+        """
+        return [
+            {
+                "attack_id": r["attackId"],
+                "name": r["name"],
+                "description": r.get("description", ""),
+            }
+            for r in self.query(sparql)
+        ]
+
+    def get_data_sources_for_technique(self, attack_id: str) -> list[str]:
+        """Get data sources needed to detect a technique."""
+        tech_uri = f"<https://attack.mitre.org/technique/{attack_id}>"
+        sparql = f"""
+        PREFIX attack: <https://attack.mitre.org/>
+
+        SELECT DISTINCT ?dataSource WHERE {{
+            {tech_uri} attack:dataSource ?dataSource .
+        }}
+        ORDER BY ?dataSource
+        """
+        return [r["dataSource"] for r in self.query(sparql)]
+
+    def get_all_data_sources(self) -> list[dict[str, str]]:
+        """Get all data sources."""
+        sparql = """
+        PREFIX attack: <https://attack.mitre.org/>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+        SELECT ?attackId ?name ?description WHERE {
+            ?ds a attack:DataSource ;
+                attack:attackId ?attackId ;
+                rdfs:label ?name .
+            OPTIONAL { ?ds attack:description ?description }
+        }
+        ORDER BY ?attackId
+        """
+        return [
+            {
+                "attack_id": r["attackId"],
+                "name": r["name"],
+                "description": r.get("description", ""),
+            }
+            for r in self.query(sparql)
+        ]
+
+    def get_techniques_by_data_source(self, data_source: str) -> list[dict[str, str]]:
+        """Get techniques detectable by a specific data source."""
+        # Escape quotes in data source name
+        data_source = data_source.replace('"', '\\"')
+        sparql = f"""
+        PREFIX attack: <https://attack.mitre.org/>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+        SELECT DISTINCT ?attackId ?name WHERE {{
+            ?technique a attack:Technique ;
+                       attack:dataSource ?ds ;
+                       attack:attackId ?attackId ;
+                       rdfs:label ?name .
+            FILTER(CONTAINS(LCASE(?ds), LCASE("{data_source}")))
+        }}
+        ORDER BY ?attackId
+        """
+        return [{"attack_id": r["attackId"], "name": r["name"]} for r in self.query(sparql)]
+
+    # -------------------------------------------------------------------------
+    # Enhanced entity queries
+    # -------------------------------------------------------------------------
+
+    def get_technique_full(self, attack_id: str) -> dict[str, Any] | None:
+        """Get full technique details including all metadata."""
+        tech_uri = f"<https://attack.mitre.org/technique/{attack_id}>"
+        sparql = f"""
+        PREFIX attack: <https://attack.mitre.org/>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+        SELECT ?name ?description ?detection ?url ?version
+               (GROUP_CONCAT(DISTINCT ?platform; separator=",") AS ?platforms)
+               (GROUP_CONCAT(DISTINCT ?dataSource; separator="|") AS ?dataSources)
+               (GROUP_CONCAT(DISTINCT ?domain; separator=",") AS ?domains)
+        WHERE {{
+            {tech_uri} rdfs:label ?name .
+            OPTIONAL {{ {tech_uri} attack:description ?description }}
+            OPTIONAL {{ {tech_uri} attack:detection ?detection }}
+            OPTIONAL {{ {tech_uri} attack:url ?url }}
+            OPTIONAL {{ {tech_uri} attack:version ?version }}
+            OPTIONAL {{ {tech_uri} attack:platform ?platform }}
+            OPTIONAL {{ {tech_uri} attack:dataSource ?dataSource }}
+            OPTIONAL {{ {tech_uri} attack:domain ?domain }}
+        }}
+        GROUP BY ?name ?description ?detection ?url ?version
+        """
+        results = self.query(sparql)
+        if not results:
+            return None
+
+        r = results[0]
+        platforms = r.get("platforms", "")
+        data_sources = r.get("dataSources", "")
+        domains = r.get("domains", "")
+
+        return {
+            "attack_id": attack_id,
+            "name": r.get("name", ""),
+            "description": r.get("description", ""),
+            "detection": r.get("detection", ""),
+            "url": r.get("url", ""),
+            "version": r.get("version", ""),
+            "platforms": [p.strip() for p in platforms.split(",") if p.strip()] if platforms else [],
+            "data_sources": [d.strip() for d in data_sources.split("|") if d.strip()] if data_sources else [],
+            "domains": [d.strip() for d in domains.split(",") if d.strip()] if domains else [],
+        }
+
+    def get_group_full(self, attack_id: str) -> dict[str, Any] | None:
+        """Get full group details including description and aliases."""
+        group_uri = f"<https://attack.mitre.org/group/{attack_id}>"
+        sparql = f"""
+        PREFIX attack: <https://attack.mitre.org/>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+        SELECT ?name ?description ?url
+               (GROUP_CONCAT(DISTINCT ?alias; separator=",") AS ?aliases)
+               (GROUP_CONCAT(DISTINCT ?contributor; separator="|") AS ?contributors)
+        WHERE {{
+            {group_uri} rdfs:label ?name .
+            OPTIONAL {{ {group_uri} attack:description ?description }}
+            OPTIONAL {{ {group_uri} attack:url ?url }}
+            OPTIONAL {{ {group_uri} attack:alias ?alias }}
+            OPTIONAL {{ {group_uri} attack:contributor ?contributor }}
+        }}
+        GROUP BY ?name ?description ?url
+        """
+        results = self.query(sparql)
+        if not results:
+            return None
+
+        r = results[0]
+        aliases = r.get("aliases", "")
+        contributors = r.get("contributors", "")
+
+        return {
+            "attack_id": attack_id,
+            "name": r.get("name", ""),
+            "description": r.get("description", ""),
+            "url": r.get("url", ""),
+            "aliases": [a.strip() for a in aliases.split(",") if a.strip()] if aliases else [],
+            "contributors": [c.strip() for c in contributors.split("|") if c.strip()] if contributors else [],
+        }
+
+    def get_software_full(self, attack_id: str) -> dict[str, Any] | None:
+        """Get full software details including description, platforms, and aliases."""
+        software_uri = f"<https://attack.mitre.org/software/{attack_id}>"
+        sparql = f"""
+        PREFIX attack: <https://attack.mitre.org/>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+        SELECT ?name ?description ?url ?type
+               (GROUP_CONCAT(DISTINCT ?platform; separator=",") AS ?platforms)
+               (GROUP_CONCAT(DISTINCT ?alias; separator=",") AS ?aliases)
+        WHERE {{
+            {software_uri} rdfs:label ?name ;
+                           a ?type .
+            FILTER(?type IN (attack:Malware, attack:Tool))
+            OPTIONAL {{ {software_uri} attack:description ?description }}
+            OPTIONAL {{ {software_uri} attack:url ?url }}
+            OPTIONAL {{ {software_uri} attack:platform ?platform }}
+            OPTIONAL {{ {software_uri} attack:alias ?alias }}
+        }}
+        GROUP BY ?name ?description ?url ?type
+        """
+        results = self.query(sparql)
+        if not results:
+            return None
+
+        r = results[0]
+        platforms = r.get("platforms", "")
+        aliases = r.get("aliases", "")
+
+        return {
+            "attack_id": attack_id,
+            "name": r.get("name", ""),
+            "description": r.get("description", ""),
+            "url": r.get("url", ""),
+            "type": "Malware" if "Malware" in r.get("type", "") else "Tool",
+            "platforms": [p.strip() for p in platforms.split(",") if p.strip()] if platforms else [],
+            "aliases": [a.strip() for a in aliases.split(",") if a.strip()] if aliases else [],
+        }
+
+    def get_mitigation_full(self, attack_id: str) -> dict[str, Any] | None:
+        """Get full mitigation details including description."""
+        mit_uri = f"<https://attack.mitre.org/mitigation/{attack_id}>"
+        sparql = f"""
+        PREFIX attack: <https://attack.mitre.org/>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+        SELECT ?name ?description ?url WHERE {{
+            {mit_uri} rdfs:label ?name .
+            OPTIONAL {{ {mit_uri} attack:description ?description }}
+            OPTIONAL {{ {mit_uri} attack:url ?url }}
+        }}
+        """
+        results = self.query(sparql)
+        if not results:
+            return None
+
+        r = results[0]
+        return {
+            "attack_id": attack_id,
+            "name": r.get("name", ""),
+            "description": r.get("description", ""),
+            "url": r.get("url", ""),
+        }
+
+    # -------------------------------------------------------------------------
+    # Cross-entity queries
+    # -------------------------------------------------------------------------
+
+    def get_techniques_by_platform(self, platform: str) -> list[dict[str, str]]:
+        """Get all techniques targeting a specific platform."""
+        platform = platform.replace('"', '\\"')
+        sparql = f"""
+        PREFIX attack: <https://attack.mitre.org/>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+        SELECT ?attackId ?name WHERE {{
+            ?technique a attack:Technique ;
+                       attack:platform "{platform}" ;
+                       attack:attackId ?attackId ;
+                       rdfs:label ?name .
+        }}
+        ORDER BY ?attackId
+        """
+        return [{"attack_id": r["attackId"], "name": r["name"]} for r in self.query(sparql)]
+
+    def get_all_platforms(self) -> list[str]:
+        """Get all unique platforms in the dataset."""
+        sparql = """
+        PREFIX attack: <https://attack.mitre.org/>
+
+        SELECT DISTINCT ?platform WHERE {
+            ?entity attack:platform ?platform .
+        }
+        ORDER BY ?platform
+        """
+        return [r["platform"] for r in self.query(sparql)]
+
+    def get_techniques_by_tactic_with_details(self, tactic: str) -> list[dict[str, Any]]:
+        """Get all techniques for a tactic with full details."""
+        sparql = f"""
+        PREFIX attack: <https://attack.mitre.org/>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+        SELECT ?attackId ?name ?description
+               (GROUP_CONCAT(DISTINCT ?platform; separator=",") AS ?platforms)
+        WHERE {{
+            ?technique a attack:Technique ;
+                       attack:tactic attack:tactic/{tactic} ;
+                       attack:attackId ?attackId ;
+                       rdfs:label ?name .
+            OPTIONAL {{ ?technique attack:description ?description }}
+            OPTIONAL {{ ?technique attack:platform ?platform }}
+        }}
+        GROUP BY ?attackId ?name ?description
+        ORDER BY ?attackId
+        """
+        results = []
+        for r in self.query(sparql):
+            platforms = r.get("platforms", "")
+            results.append({
+                "attack_id": r["attackId"],
+                "name": r["name"],
+                "description": r.get("description", "")[:200] + "..." if len(r.get("description", "")) > 200 else r.get("description", ""),
+                "platforms": [p.strip() for p in platforms.split(",") if p.strip()] if platforms else [],
+            })
+        return results
+
+    def find_software_by_name(self, name: str) -> list[dict[str, str]]:
+        """Find software by name or alias (case-insensitive contains)."""
+        name = name.replace('"', '\\"')
+        sparql = f"""
+        PREFIX attack: <https://attack.mitre.org/>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+        SELECT DISTINCT ?attackId ?name ?type WHERE {{
+            ?software a ?type ;
+                      attack:attackId ?attackId ;
+                      rdfs:label ?name .
+            FILTER(?type IN (attack:Malware, attack:Tool))
+            {{
+                FILTER(CONTAINS(LCASE(?name), LCASE("{name}")))
+            }}
+            UNION
+            {{
+                ?software attack:alias ?alias .
+                FILTER(CONTAINS(LCASE(?alias), LCASE("{name}")))
+            }}
+        }}
+        ORDER BY ?name
+        """
+        return [
+            {
+                "attack_id": r["attackId"],
+                "name": r["name"],
+                "type": "Malware" if "Malware" in r.get("type", "") else "Tool",
+            }
+            for r in self.query(sparql)
+        ]
+
+    def get_common_techniques(self, entity_ids: list[str], entity_type: str = "group") -> list[dict[str, Any]]:
+        """Find techniques used by all specified entities (groups or software)."""
+        if not entity_ids or len(entity_ids) < 2:
+            return []
+
+        # Build URIs based on entity type
+        if entity_type == "group":
+            uris = [f"<https://attack.mitre.org/group/{eid}>" for eid in entity_ids]
+        else:
+            uris = [f"<https://attack.mitre.org/software/{eid}>" for eid in entity_ids]
+
+        # Build SPARQL with intersection pattern
+        patterns = []
+        for i, uri in enumerate(uris):
+            patterns.append(f"{uri} attack:uses ?technique .")
+
+        sparql = f"""
+        PREFIX attack: <https://attack.mitre.org/>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+        SELECT ?attackId ?name WHERE {{
+            {" ".join(patterns)}
+            ?technique attack:attackId ?attackId ;
+                       rdfs:label ?name .
+        }}
+        ORDER BY ?attackId
+        """
+        return [{"attack_id": r["attackId"], "name": r["name"]} for r in self.query(sparql)]
