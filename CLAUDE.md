@@ -139,3 +139,5 @@ sparql = f"{tech_uri} ..."
 **RDF format**: Use N-Triples (.nt) over Turtle (.ttl) - loads significantly faster.
 
 **Data loading**: `bulk_load` must specify `to_graph=pyoxigraph.DefaultGraph()` or data goes into a named graph and queries return empty.
+
+**Subtechnique Mitigation Inheritance**: When querying mitigations for subtechniques (e.g., T1059.001 PowerShell), the system automatically includes mitigations from the parent technique (T1059 Command and Scripting Interpreter). This is handled by `get_mitigations_with_inheritance()` in `graph.py`. Inherited mitigations are marked with `inherited: true` in the response and displayed with an `[inherited]` marker in the CLI and REPL.

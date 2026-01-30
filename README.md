@@ -73,6 +73,21 @@ After running `build`, the knowledge graph contains:
 - ~40 mitigations
 - 52,000+ RDF triples total
 
+## Features
+
+### Subtechnique Mitigation Inheritance
+
+When querying mitigations for subtechniques (e.g., T1059.001 PowerShell), the system automatically includes mitigations from the parent technique (e.g., T1059 Command and Scripting Interpreter). This ensures you get complete remediation recommendations:
+
+```bash
+# Mitigations for T1059.001 include both:
+# - Direct mitigations targeting T1059.001 specifically
+# - Inherited mitigations from parent T1059 (marked with [inherited])
+uv run attack-kg technique T1059.001
+```
+
+Inherited mitigations are marked with `[inherited]` in CLI output and with `inherited: true` in JSON responses.
+
 ## Project Structure
 
 ```
