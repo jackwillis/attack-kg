@@ -135,11 +135,27 @@ class EmbeddingGenerator:
             self.revision = NOMIC_EMBED_REVISION
         self._model = None
 
+    def _is_model_cached(self) -> bool:
+        """Check if the model is already downloaded."""
+        try:
+            from huggingface_hub import try_to_load_from_cache
+            # Check if any model file exists in cache
+            result = try_to_load_from_cache(self.model_name, "config.json", revision=self.revision)
+            return result is not None
+        except Exception:
+            return False
+
     @property
     def model(self):
         """Lazy-load the embedding model."""
         if self._model is None:
-            console.print(f"[blue]Loading embedding model: {self.model_name}[/blue]")
+            is_cached = self._is_model_cached()
+            if is_cached:
+                console.print(f"[blue]Loading embedding model: {self.model_name}[/blue]")
+            else:
+                console.print(f"[blue]Downloading embedding model: {self.model_name}[/blue]")
+                console.print(f"[dim]This may take a minute on first run...[/dim]")
+
             from sentence_transformers import SentenceTransformer
 
             self._model = SentenceTransformer(
@@ -170,7 +186,6 @@ class EmbeddingGenerator:
         texts = [doc.to_text() for doc in documents]
 
         console.print(f"[blue]Generating embeddings for {len(texts)} documents...[/blue]")
-        console.print(f"[dim]This may take a minute on first run (downloading model)...[/dim]")
 
         # Use sentence-transformers' built-in progress bar
         embeddings = self.model.encode(texts, show_progress_bar=True, batch_size=32)
