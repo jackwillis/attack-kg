@@ -1,5 +1,6 @@
 """Entity presenters for rich formatted output in the graph browser."""
 
+import os
 from typing import Any
 
 from rich.console import Console
@@ -10,6 +11,12 @@ from rich.text import Text
 console = Console()
 
 
+def _use_pager() -> bool:
+    """Check if we should use a pager for long output."""
+    # Respect PAGER env var, default to using pager if terminal
+    return console.is_terminal and os.environ.get("ATTACK_KG_NO_PAGER") != "1"
+
+
 class EntityPresenter:
     """Base presenter with common formatting."""
 
@@ -17,21 +24,11 @@ class EntityPresenter:
         """Present an entity with rich formatting."""
         raise NotImplementedError
 
-    def _truncate(self, text: str, max_len: int = 200) -> str:
-        """Truncate text with ellipsis."""
-        if not text:
-            return ""
-        if len(text) <= max_len:
-            return text
-        return text[:max_len].rsplit(" ", 1)[0] + "..."
-
-    def _format_list(self, items: list[str], max_items: int = 5) -> str:
-        """Format a list with optional truncation."""
+    def _format_list(self, items: list[str]) -> str:
+        """Format a list for display."""
         if not items:
             return "[dim]none[/dim]"
-        if len(items) <= max_items:
-            return ", ".join(items)
-        return ", ".join(items[:max_items]) + f" (+{len(items) - max_items} more)"
+        return ", ".join(items)
 
 
 class TechniquePresenter(EntityPresenter):
@@ -54,28 +51,24 @@ class TechniquePresenter(EntityPresenter):
         if platforms:
             console.print(f"[yellow]Platforms:[/yellow] {', '.join(platforms)}")
 
-        # Description (truncated unless full)
+        # Description
         description = entity.get("description", "")
         if description:
-            if full:
-                console.print(f"\n[dim]{description}[/dim]")
-            else:
-                console.print(f"\n[dim]{self._truncate(description, 300)}[/dim]")
+            console.print(f"\n[dim]{description}[/dim]")
 
-        # Detection info (only in full view)
-        if full:
-            detection = entity.get("detection", "")
-            if detection:
-                console.print(f"\n[yellow]Detection:[/yellow]")
-                console.print(f"[dim]{detection}[/dim]")
+        # Detection info
+        detection = entity.get("detection", "")
+        if detection:
+            console.print(f"\n[yellow]Detection:[/yellow]")
+            console.print(f"[dim]{detection}[/dim]")
 
-            data_sources = entity.get("data_sources", [])
-            if data_sources:
-                console.print(f"\n[yellow]Data Sources:[/yellow] {self._format_list(data_sources, 10)}")
+        data_sources = entity.get("data_sources", [])
+        if data_sources:
+            console.print(f"\n[yellow]Data Sources:[/yellow] {self._format_list(data_sources)}")
 
-            url = entity.get("url", "")
-            if url:
-                console.print(f"\n[blue]URL:[/blue] {url}")
+        url = entity.get("url", "")
+        if url:
+            console.print(f"\n[blue]URL:[/blue] {url}")
 
 
 class GroupPresenter(EntityPresenter):
@@ -87,25 +80,18 @@ class GroupPresenter(EntityPresenter):
         aliases = entity.get("aliases", [])
 
         # Header with aliases
-        alias_str = f" ({', '.join(aliases[:3])})" if aliases else ""
+        alias_str = f" ({', '.join(aliases)})" if aliases else ""
         console.print(f"\n[bold magenta]{attack_id}[/bold magenta] - [bold]{name}[/bold]{alias_str}")
         console.print("━" * 50)
 
         # Description
         description = entity.get("description", "")
         if description:
-            if full:
-                console.print(f"\n[dim]{description}[/dim]")
-            else:
-                console.print(f"\n[dim]{self._truncate(description, 300)}[/dim]")
+            console.print(f"\n[dim]{description}[/dim]")
 
-        if full:
-            if aliases and len(aliases) > 3:
-                console.print(f"\n[yellow]All Aliases:[/yellow] {', '.join(aliases)}")
-
-            url = entity.get("url", "")
-            if url:
-                console.print(f"\n[blue]URL:[/blue] {url}")
+        url = entity.get("url", "")
+        if url:
+            console.print(f"\n[blue]URL:[/blue] {url}")
 
 
 class SoftwarePresenter(EntityPresenter):
@@ -120,7 +106,7 @@ class SoftwarePresenter(EntityPresenter):
 
         # Header
         type_color = "red" if sw_type == "Malware" else "green"
-        alias_str = f" ({', '.join(aliases[:2])})" if aliases else ""
+        alias_str = f" ({', '.join(aliases)})" if aliases else ""
         console.print(f"\n[bold {type_color}]{attack_id}[/bold {type_color}] - [bold]{name}[/bold]{alias_str}")
         console.print(f"[{type_color}][{sw_type}][/{type_color}]")
         console.print("━" * 50)
@@ -130,15 +116,11 @@ class SoftwarePresenter(EntityPresenter):
 
         description = entity.get("description", "")
         if description:
-            if full:
-                console.print(f"\n[dim]{description}[/dim]")
-            else:
-                console.print(f"\n[dim]{self._truncate(description, 300)}[/dim]")
+            console.print(f"\n[dim]{description}[/dim]")
 
-        if full:
-            url = entity.get("url", "")
-            if url:
-                console.print(f"\n[blue]URL:[/blue] {url}")
+        url = entity.get("url", "")
+        if url:
+            console.print(f"\n[blue]URL:[/blue] {url}")
 
 
 class MitigationPresenter(EntityPresenter):
@@ -153,15 +135,11 @@ class MitigationPresenter(EntityPresenter):
 
         description = entity.get("description", "")
         if description:
-            if full:
-                console.print(f"\n[dim]{description}[/dim]")
-            else:
-                console.print(f"\n[dim]{self._truncate(description, 300)}[/dim]")
+            console.print(f"\n[dim]{description}[/dim]")
 
-        if full:
-            url = entity.get("url", "")
-            if url:
-                console.print(f"\n[blue]URL:[/blue] {url}")
+        url = entity.get("url", "")
+        if url:
+            console.print(f"\n[blue]URL:[/blue] {url}")
 
 
 class CampaignPresenter(EntityPresenter):
@@ -182,15 +160,11 @@ class CampaignPresenter(EntityPresenter):
 
         description = entity.get("description", "")
         if description:
-            if full:
-                console.print(f"\n[dim]{description}[/dim]")
-            else:
-                console.print(f"\n[dim]{self._truncate(description, 300)}[/dim]")
+            console.print(f"\n[dim]{description}[/dim]")
 
-        if full:
-            url = entity.get("url", "")
-            if url:
-                console.print(f"\n[blue]URL:[/blue] {url}")
+        url = entity.get("url", "")
+        if url:
+            console.print(f"\n[blue]URL:[/blue] {url}")
 
 
 class TacticPresenter(EntityPresenter):
@@ -219,10 +193,7 @@ class DataSourcePresenter(EntityPresenter):
 
         description = entity.get("description", "")
         if description:
-            if full:
-                console.print(f"\n[dim]{description}[/dim]")
-            else:
-                console.print(f"\n[dim]{self._truncate(description, 300)}[/dim]")
+            console.print(f"\n[dim]{description}[/dim]")
 
 
 # Presenter registry
@@ -312,16 +283,15 @@ def present_connections(
             count = len(items)
             console.print(f"\n  [{color}]{label} ({count}):[/{color}]")
 
-            # Show first few items
-            for item in items[:8]:
+            # Show all items
+            for item in items:
                 attack_id = item.get("attack_id", "")
                 name = item.get("name", "")
                 item_type = item.get("type", "")
                 type_suffix = f" [{item_type}]" if item_type else ""
-                console.print(f"    [dim]→[/dim] [cyan]{attack_id}[/cyan] {name}{type_suffix}")
-
-            if count > 8:
-                console.print(f"    [dim]... and {count - 8} more[/dim]")
+                # Show inherited marker for mitigations
+                inherited_marker = " [dim][inherited][/dim]" if item.get("inherited") else ""
+                console.print(f"    [dim]→[/dim] [cyan]{attack_id}[/cyan] {name}{type_suffix}{inherited_marker}")
 
     if not has_connections:
         console.print("\n  [dim]No connections found[/dim]")
@@ -344,58 +314,46 @@ def present_search_results(results: dict[str, list[dict[str, Any]]]) -> None:
         table.add_column("Score", justify="right", width=6)
         table.add_column("Tactics", style="dim")
 
-        for t in techniques[:10]:
-            tactics = ", ".join(t.get("tactics", [])[:2])
-            if len(t.get("tactics", [])) > 2:
-                tactics += "..."
+        for t in techniques:
+            tactics = ", ".join(t.get("tactics", []))
             score = f"{t.get('similarity', 0):.2f}"
             table.add_row(t["attack_id"], t["name"], score, tactics)
 
         console.print(table)
-        if len(techniques) > 10:
-            console.print(f"  [dim]... and {len(techniques) - 10} more[/dim]")
 
     # Groups
     groups = results.get("groups", [])
     if groups:
         has_results = True
         console.print("\n[bold magenta]Groups[/bold magenta] (text match):")
-        for g in groups[:5]:
+        for g in groups:
             console.print(f"  [magenta]{g['attack_id']}[/magenta]  {g['name']}")
-        if len(groups) > 5:
-            console.print(f"  [dim]... and {len(groups) - 5} more[/dim]")
 
     # Software
     software = results.get("software", [])
     if software:
         has_results = True
         console.print("\n[bold yellow]Software[/bold yellow] (text match):")
-        for s in software[:5]:
+        for s in software:
             sw_type = s.get("type", "")
             console.print(f"  [yellow]{s['attack_id']}[/yellow]  {s['name']} [{sw_type}]")
-        if len(software) > 5:
-            console.print(f"  [dim]... and {len(software) - 5} more[/dim]")
 
     # Mitigations
     mitigations = results.get("mitigations", [])
     if mitigations:
         has_results = True
         console.print("\n[bold green]Mitigations[/bold green] (text match):")
-        for m in mitigations[:5]:
+        for m in mitigations:
             console.print(f"  [green]{m['attack_id']}[/green]  {m['name']}")
-        if len(mitigations) > 5:
-            console.print(f"  [dim]... and {len(mitigations) - 5} more[/dim]")
 
     # Campaigns
     campaigns = results.get("campaigns", [])
     if campaigns:
         has_results = True
         console.print("\n[bold yellow]Campaigns[/bold yellow] (text match):")
-        for c in campaigns[:5]:
+        for c in campaigns:
             date_str = f" ({c.get('first_seen', '')})" if c.get('first_seen') else ""
             console.print(f"  [yellow]{c['attack_id']}[/yellow]  {c['name']}{date_str}")
-        if len(campaigns) > 5:
-            console.print(f"  [dim]... and {len(campaigns) - 5} more[/dim]")
 
     if not has_results:
         console.print("\n[yellow]No results found[/yellow]")

@@ -164,7 +164,7 @@ class HybridQueryEngine:
 
         # Get related entities
         groups = self.graph.get_groups_using_technique(attack_id)
-        mitigations = self.graph.get_mitigations_for_technique(attack_id)
+        mitigations = self.graph.get_mitigations_with_inheritance(attack_id)
         software = self.graph.get_software_using_technique(attack_id)
         subtechniques = self.graph.get_subtechniques(attack_id)
 
@@ -281,7 +281,7 @@ class HybridQueryEngine:
 
         groups = self.graph.get_groups_using_technique(technique_id)
         software = self.graph.get_software_using_technique(technique_id)
-        mitigations = self.graph.get_mitigations_for_technique(technique_id)
+        mitigations = self.graph.get_mitigations_with_inheritance(technique_id)
         subtechniques = self.graph.get_subtechniques(technique_id)
 
         # Get similar techniques via semantic search
@@ -364,10 +364,10 @@ class HybridQueryEngine:
             if search_results:
                 tactics_used.update(search_results[0].tactics)
 
-        # Consolidate mitigations across all techniques
+        # Consolidate mitigations across all techniques (with inheritance)
         all_mitigations = {}
         for tech in techniques:
-            for mit in self.graph.get_mitigations_for_technique(tech["attack_id"]):
+            for mit in self.graph.get_mitigations_with_inheritance(tech["attack_id"]):
                 if mit["attack_id"] not in all_mitigations:
                     all_mitigations[mit["attack_id"]] = {
                         **mit,
@@ -915,11 +915,10 @@ class HybridQueryEngine:
 
         results = []
         for r in self.graph.query(sparql):
-            desc = r.get("description", "")
             results.append({
                 "attack_id": r.get("attackId", ""),
                 "name": r["name"],
-                "description_preview": desc[:150] + "..." if len(desc) > 150 else desc,
+                "description": r.get("description", ""),
             })
 
         return results
@@ -1094,7 +1093,7 @@ class HybridQueryEngine:
         if entity_type == "technique":
             relationships["groups"] = self.graph.get_groups_using_technique(attack_id)
             relationships["software"] = self.graph.get_software_using_technique(attack_id)
-            relationships["mitigations"] = self.graph.get_mitigations_for_technique(attack_id)
+            relationships["mitigations"] = self.graph.get_mitigations_with_inheritance(attack_id)
             relationships["campaigns"] = self.graph.get_campaigns_using_technique(attack_id)
             relationships["subtechniques"] = self.graph.get_subtechniques(attack_id)
             relationships["detection_strategies"] = self.graph.get_detection_strategies_for_technique(attack_id)

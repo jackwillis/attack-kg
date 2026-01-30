@@ -174,8 +174,7 @@ def technique(
 
     # Basic info
     console.print(Panel(
-        f"[bold]{tech['name']}[/bold] ({attack_id})\n\n{tech['description'][:500]}..."
-        if len(tech['description']) > 500 else f"[bold]{tech['name']}[/bold] ({attack_id})\n\n{tech['description']}",
+        f"[bold]{tech['name']}[/bold] ({attack_id})\n\n{tech['description']}",
         title="Technique",
     ))
 
@@ -187,11 +186,12 @@ def technique(
                 console.print(f"  • {g['name']} ({g['attack_id']})")
 
     if show_mitigations:
-        mitigations = graph.get_mitigations_for_technique(attack_id)
+        mitigations = graph.get_mitigations_with_inheritance(attack_id)
         if mitigations:
             console.print(f"\n[bold]Mitigations:[/bold]")
             for m in mitigations:
-                console.print(f"  • {m['name']} ({m['attack_id']})")
+                inherited_marker = " [inherited]" if m.get("inherited") else ""
+                console.print(f"  • {m['name']} ({m['attack_id']}){inherited_marker}")
 
     if show_software:
         software = graph.get_software_using_technique(attack_id)
