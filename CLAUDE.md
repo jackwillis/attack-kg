@@ -45,6 +45,7 @@ uv run attack-kg repl --model gpt-oss:20b   # REPL with specific model
 # Environment variables
 # OLLAMA_HOST      - Ollama server URL (default: http://localhost:11434)
 # OPENAI_API_KEY   - OpenAI API key (for --backend openai)
+# ATTACK_KG_OFFLINE - Set to 1 to prevent HuggingFace model downloads at runtime
 
 # Tests
 uv run pytest                           # All tests

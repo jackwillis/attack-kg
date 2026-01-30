@@ -120,6 +120,7 @@ class EmbeddingGenerator:
         self,
         model_name: str = "nomic-ai/nomic-embed-text-v1.5",
         revision: str | None = None,
+        local_files_only: bool | None = None,
     ):
         """
         Initialize the embedding model.
@@ -127,12 +128,19 @@ class EmbeddingGenerator:
         Args:
             model_name: Name of the sentence-transformers model to use
             revision: Model revision (commit hash) to pin
+            local_files_only: If True, only use cached models (no network access).
+                              Defaults to ATTACK_KG_OFFLINE env var or False.
         """
+        import os
         self.model_name = model_name
         self.revision = revision
         # Default to pinned revision for nomic model
         if model_name == "nomic-ai/nomic-embed-text-v1.5" and revision is None:
             self.revision = NOMIC_EMBED_REVISION
+        # Check env var for offline mode
+        if local_files_only is None:
+            local_files_only = os.environ.get("ATTACK_KG_OFFLINE", "").lower() in ("1", "true", "yes")
+        self.local_files_only = local_files_only
         self._model = None
 
     def _is_model_cached(self) -> bool:
@@ -150,6 +158,13 @@ class EmbeddingGenerator:
         """Lazy-load the embedding model."""
         if self._model is None:
             is_cached = self._is_model_cached()
+
+            if self.local_files_only and not is_cached:
+                raise RuntimeError(
+                    f"Model {self.model_name} not found in cache and ATTACK_KG_OFFLINE=1. "
+                    f"Run 'attack-kg build' first to download the model."
+                )
+
             if is_cached:
                 console.print(f"[blue]Loading embedding model: {self.model_name}[/blue]")
             else:
@@ -162,6 +177,7 @@ class EmbeddingGenerator:
                 self.model_name,
                 trust_remote_code=True,
                 revision=self.revision,
+                local_files_only=self.local_files_only,
             )
         return self._model
 

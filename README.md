@@ -57,12 +57,13 @@ attack-kg> sparql SELECT ?name WHERE { ?t a attack:Technique ; rdfs:label ?name 
 |----------|-------------|---------|
 | `OLLAMA_HOST` | Ollama server URL (for Docker/remote) | `http://localhost:11434` |
 | `OPENAI_API_KEY` | OpenAI API key (for `--backend openai`) | - |
+| `ATTACK_KG_OFFLINE` | Prevent HuggingFace model downloads at runtime | `false` |
 
 ## Architecture
 
 - **Oxigraph** - RDF triplestore (pyoxigraph) for structured SPARQL queries
 - **ChromaDB** - Vector store for semantic similarity search
-- **sentence-transformers** - Local embeddings (all-MiniLM-L6-v2)
+- **sentence-transformers** - Local embeddings (nomic-embed-text-v1.5, pinned revision)
 
 ## Data
 
