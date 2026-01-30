@@ -1,0 +1,53 @@
+%%{init: {'theme': 'base'}}%%
+
+graph LR
+    subgraph KB["Knowledge Base (800+ Techniques)"]
+        direction TB
+        T1["Techniques<br/><i>attack-pattern</i>"]
+        G1["Groups<br/><i>intrusion-set</i>"]
+        S1["Software<br/><i>malware/tool</i>"]
+        M1["Mitigations<br/><i>course-of-action</i>"]
+        TC["Tactics<br/><i>kill-chain-phase</i>"]
+    end
+
+    subgraph Relations["RDF Relationships"]
+        direction TB
+        R1["attack:uses"]
+        R2["attack:mitigates"]
+        R3["attack:subtechniqueOf"]
+        R4["attack:tactic"]
+    end
+
+    subgraph Queries["Query Capabilities"]
+        direction TB
+        Q1["Technique Lookup<br/><i>get_technique(T1110.003)</i>"]
+        Q2["Group Analysis<br/><i>get_techniques_for_group(APT29)</i>"]
+        Q3["Mitigation Mapping<br/><i>get_mitigations_for_technique()</i>"]
+        Q4["Semantic Search<br/><i>search('credential theft')</i>"]
+        Q5["Narrative Analysis<br/><i>analyze('password spray found')</i>"]
+    end
+
+    T1 --- R1
+    G1 --- R1
+    S1 --- R1
+    T1 --- R2
+    M1 --- R2
+    T1 --- R3
+    T1 --- R4
+    TC --- R4
+
+    R1 --> Q1
+    R1 --> Q2
+    R2 --> Q3
+    R3 --> Q1
+    R4 --> Q4
+    Q1 --> Q5
+    Q4 --> Q5
+
+    classDef entity fill:#E8F4F8,stroke:#4A90A4
+    classDef relation fill:#FFF3CD,stroke:#FFC107
+    classDef query fill:#D4EDDA,stroke:#28A745
+
+    class T1,G1,S1,M1,TC entity
+    class R1,R2,R3,R4 relation
+    class Q1,Q2,Q3,Q4,Q5 query

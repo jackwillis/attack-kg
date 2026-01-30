@@ -1,0 +1,49 @@
+%%{init: {'theme': 'base'}}%%
+
+sequenceDiagram
+    autonumber
+    participant User
+    participant CLI as CLI (cli.py)
+    participant Hybrid as HybridQueryEngine
+    participant Vectors as ChromaDB
+    participant Graph as Oxigraph
+    participant LLM as LLM Backend
+
+    Note over User,LLM: Query Flow: "Found password spraying attack"
+
+    User->>CLI: analyze "Found password spraying attack"
+    CLI->>Hybrid: query(narrative, top_k=10)
+
+    rect rgb(230, 245, 255)
+        Note over Hybrid,Vectors: Step 1: Neural Search (Vector Similarity)
+        Hybrid->>Vectors: embed(narrative)
+        Vectors-->>Hybrid: embedding vector
+        Hybrid->>Vectors: search(vector, top_k=10)
+        Vectors-->>Hybrid: candidates [T1110.003, T1078, ...]
+    end
+
+    rect rgb(255, 245, 230)
+        Note over Hybrid,Graph: Step 2: Symbolic Enrichment (SPARQL)
+        loop For each candidate technique
+            Hybrid->>Graph: get_technique(id)
+            Graph-->>Hybrid: technique details
+            Hybrid->>Graph: get_tactics(id)
+            Graph-->>Hybrid: [credential-access, ...]
+            Hybrid->>Graph: get_groups_using(id)
+            Graph-->>Hybrid: [APT29, APT28, ...]
+            Hybrid->>Graph: get_mitigations(id)
+            Graph-->>Hybrid: [M1036, M1027, ...]
+        end
+    end
+
+    Hybrid-->>CLI: EnrichedTechnique[]
+
+    rect rgb(255, 230, 230)
+        Note over CLI,LLM: Step 3: LLM Reasoning
+        CLI->>LLM: classify(narrative, candidates)
+        LLM-->>CLI: confidence scores + evidence
+        CLI->>LLM: generate_remediations(techniques)
+        LLM-->>CLI: RemediationItem[]
+    end
+
+    CLI-->>User: AnalysisResult<br/>{techniques, remediations}

@@ -1,0 +1,52 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4A90A4'}}}%%
+
+sequenceDiagram
+    autonumber
+    participant User
+    participant CLI
+    participant HybridEngine as HybridQueryEngine
+    participant Semantic as SemanticSearchEngine
+    participant ChromaDB
+    participant Graph as AttackGraph
+    participant Oxigraph
+    participant LLM as AttackAnalyzer + LLM
+
+    User->>CLI: analyze "password spraying attack"
+    CLI->>HybridEngine: query(finding_text, top_k=5)
+
+    rect rgb(232, 244, 248)
+        Note over HybridEngine,ChromaDB: Neural Component - Semantic Search
+        HybridEngine->>Semantic: search(finding_text)
+        Semantic->>ChromaDB: query(embedding, n_results=5)
+        ChromaDB-->>Semantic: candidate techniques + similarity scores
+        Semantic-->>HybridEngine: SemanticResult[]
+    end
+
+    rect rgb(212, 237, 218)
+        Note over HybridEngine,Oxigraph: Symbolic Component - SPARQL Enrichment
+        loop For each candidate technique
+            HybridEngine->>Graph: get_technique_full(attack_id)
+            Graph->>Oxigraph: SPARQL query
+            Oxigraph-->>Graph: technique details
+            HybridEngine->>Graph: get_groups_using_technique()
+            HybridEngine->>Graph: get_mitigations_with_inheritance()
+            HybridEngine->>Graph: get_campaigns_using_technique()
+            HybridEngine->>Graph: get_detection_strategies_for_technique()
+            HybridEngine->>Graph: get_data_sources_for_technique()
+        end
+        Graph-->>HybridEngine: enriched graph data
+    end
+
+    HybridEngine-->>CLI: EnrichedTechnique[]
+
+    rect rgb(248, 215, 218)
+        Note over CLI,LLM: LLM Reasoning
+        CLI->>LLM: analyze(finding_text, candidates)
+        Note right of LLM: Handles both:<br/>- Attack narratives<br/>- Vulnerability findings<br/><br/>Context includes:<br/>- Platforms, Groups<br/>- Campaigns, Data Sources<br/>- Inherited mitigations
+        LLM->>LLM: classify techniques (observed or potential)
+        LLM->>LLM: generate remediation
+        LLM->>LLM: recommend detection
+        LLM-->>CLI: AnalysisResult
+    end
+
+    CLI-->>User: Techniques, Mitigations,<br/>Detection Recommendations,<br/>Kill Chain Analysis
