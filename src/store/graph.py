@@ -222,6 +222,76 @@ class AttackGraph:
         """
         return [{"attack_id": r["attackId"], "name": r["name"]} for r in self.query(sparql)]
 
+    def get_mitigations_with_inheritance(self, attack_id: str) -> list[dict[str, Any]]:
+        """
+        Get mitigations for a technique, including parent mitigations for subtechniques.
+
+        For subtechniques (e.g., T1059.001), this returns both:
+        - Direct mitigations that specifically target the subtechnique
+        - Inherited mitigations from the parent technique (e.g., T1059)
+
+        Args:
+            attack_id: ATT&CK technique ID (e.g., T1059.001 or T1059)
+
+        Returns:
+            List of mitigations with 'inherited' flag indicating source
+        """
+        tech_uri = f"<https://attack.mitre.org/technique/{attack_id}>"
+
+        # Check if this is a subtechnique
+        if "." in attack_id:
+            parent_id = attack_id.split(".")[0]
+            parent_uri = f"<https://attack.mitre.org/technique/{parent_id}>"
+
+            # UNION query: direct mitigations + parent mitigations
+            sparql = f"""
+            PREFIX attack: <https://attack.mitre.org/>
+            PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+            SELECT DISTINCT ?attackId ?name ?source WHERE {{
+                {{
+                    ?mitigation a attack:Mitigation ;
+                                attack:mitigates {tech_uri} ;
+                                attack:attackId ?attackId ;
+                                rdfs:label ?name .
+                    BIND("direct" AS ?source)
+                }}
+                UNION
+                {{
+                    ?mitigation a attack:Mitigation ;
+                                attack:mitigates {parent_uri} ;
+                                attack:attackId ?attackId ;
+                                rdfs:label ?name .
+                    BIND("inherited" AS ?source)
+                }}
+            }}
+            ORDER BY ?name
+            """
+        else:
+            # Parent technique - just get direct mitigations
+            sparql = f"""
+            PREFIX attack: <https://attack.mitre.org/>
+            PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+            SELECT ?attackId ?name WHERE {{
+                ?mitigation a attack:Mitigation ;
+                            attack:mitigates {tech_uri} ;
+                            attack:attackId ?attackId ;
+                            rdfs:label ?name .
+            }}
+            ORDER BY ?name
+            """
+
+        results = self.query(sparql)
+        return [
+            {
+                "attack_id": r["attackId"],
+                "name": r["name"],
+                "inherited": r.get("source") == "inherited",
+            }
+            for r in results
+        ]
+
     def get_software_using_technique(self, attack_id: str) -> list[dict[str, str]]:
         """Get software (malware/tools) that use a specific technique."""
         tech_uri = f"<https://attack.mitre.org/technique/{attack_id}>"
@@ -803,7 +873,7 @@ class AttackGraph:
             results.append({
                 "attack_id": r["attackId"],
                 "name": r["name"],
-                "description": r.get("description", "")[:200] + "..." if len(r.get("description", "")) > 200 else r.get("description", ""),
+                "description": r.get("description", ""),
                 "platforms": [p.strip() for p in platforms.split(",") if p.strip()] if platforms else [],
             })
         return results

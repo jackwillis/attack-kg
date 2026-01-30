@@ -318,16 +318,20 @@ Only include techniques with clear supporting evidence from the narrative."""
 
         for tech in techniques:
             if tech.attack_id in classified_ids:
-                # Collect mitigations
+                # Collect mitigations, tracking inheritance
                 for mit in tech.mitigations:
                     if mit["attack_id"] not in mitigations_by_id:
                         mitigations_by_id[mit["attack_id"]] = {
                             **mit,
                             "addresses": [tech.attack_id],
+                            "_sources": [{"tech_id": tech.attack_id, "inherited": mit.get("inherited", False)}],
                         }
                     else:
                         mitigations_by_id[mit["attack_id"]]["addresses"].append(
                             tech.attack_id
+                        )
+                        mitigations_by_id[mit["attack_id"]]["_sources"].append(
+                            {"tech_id": tech.attack_id, "inherited": mit.get("inherited", False)}
                         )
 
                 # Collect data sources for detection
@@ -337,8 +341,12 @@ Only include techniques with clear supporting evidence from the narrative."""
         # Format mitigation context
         context_parts = ["AVAILABLE MITIGATIONS:"]
         for mit_id, mit in mitigations_by_id.items():
+            # Check if any source is inherited (from parent technique)
+            inherited_note = ""
+            if any(s.get("inherited") for s in mit.get("_sources", [])):
+                inherited_note = " [inherited from parent technique]"
             context_parts.append(
-                f"- {mit_id} ({mit['name']})\n"
+                f"- {mit_id} ({mit['name']}){inherited_note}\n"
                 f"  Addresses: {', '.join(mit['addresses'])}"
             )
 
