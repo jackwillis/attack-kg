@@ -243,7 +243,7 @@ class GraphBrowser:
 
         # Query LLM
         try:
-            response = llm.query(context)
+            response = llm.generate(context)
             return response
         except Exception as e:
             return f"Error querying LLM: {e}"
