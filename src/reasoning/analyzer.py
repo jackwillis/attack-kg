@@ -442,10 +442,11 @@ Provide prioritized remediation and detection recommendations."""
 
 def print_analysis_result(result: AnalysisResult) -> None:
     """Print analysis result with rich formatting."""
+    from rich.markdown import Markdown
+
     # Header panel
-    finding_display = result.finding[:80] + "..." if len(result.finding) > 80 else result.finding
     console.print(Panel(
-        f"[bold]Finding:[/bold] {finding_display}",
+        f"[bold]Finding:[/bold] {result.finding}",
         title="[bold cyan]ATTACK ANALYSIS[/bold cyan]",
         border_style="cyan",
     ))
@@ -481,7 +482,7 @@ def print_analysis_result(result: AnalysisResult) -> None:
     # Kill chain analysis
     if result.kill_chain_analysis:
         console.print("[bold cyan]KILL CHAIN ANALYSIS[/bold cyan]")
-        console.print(f"  {result.kill_chain_analysis}")
+        console.print(Markdown(result.kill_chain_analysis))
         console.print()
 
     # Remediation section
@@ -500,7 +501,10 @@ def print_analysis_result(result: AnalysisResult) -> None:
                 f"[{priority_color}]{rem.priority} PRIORITY[/{priority_color}]"
             )
             console.print(f"   [dim]Addresses:[/dim] {', '.join(rem.addresses)}")
-            console.print(f"   [dim]Implementation:[/dim] {rem.implementation}")
+            console.print(f"   [dim]Implementation:[/dim]")
+            # Indent markdown output
+            for line in rem.implementation.split('\n'):
+                console.print(f"   {line}")
             console.print()
     else:
         console.print("[yellow]No specific remediations generated.[/yellow]\n")
@@ -512,7 +516,9 @@ def print_analysis_result(result: AnalysisResult) -> None:
 
         for det in result.detection_recommendations:
             console.print(f"[bold]• {det.data_source}[/bold]")
-            console.print(f"   [dim]Rationale:[/dim] {det.rationale}")
+            console.print(f"   [dim]Rationale:[/dim]")
+            for line in det.rationale.split('\n'):
+                console.print(f"   {line}")
             if det.techniques_covered:
                 console.print(f"   [dim]Covers:[/dim] {', '.join(det.techniques_covered)}")
             console.print()

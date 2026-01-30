@@ -454,15 +454,18 @@ def repl(
     def get_prompt() -> str:
         """Get the current prompt based on browser state."""
         path = browser.pwd()
-        return f"[bold green]{path}>[/bold green] "
+        # Use plain text for readline compatibility
+        return f"{path}> "
 
     # Show initial help
     show_help()
 
     while True:
         try:
-            user_input = console.input(get_prompt()).strip()
+            # Use standard input() for proper readline integration
+            user_input = input(get_prompt()).strip()
         except (EOFError, KeyboardInterrupt):
+            console.print()  # Clean newline on exit
             break
 
         if not user_input:
@@ -544,7 +547,9 @@ def repl(
             if llm:
                 console.print("[dim]Thinking...[/dim]")
                 response = browser.ask(arg, llm)
-                console.print(f"\n{response}")
+                from rich.markdown import Markdown
+                console.print()
+                console.print(Markdown(response))
 
         # Legacy/advanced commands
         elif cmd == "sparql" and arg:
