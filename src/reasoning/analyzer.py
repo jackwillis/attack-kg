@@ -51,12 +51,14 @@ class AnalysisResult:
     techniques: list[TechniqueMatch]
     remediations: list[RemediationItem]
     detection_recommendations: list[DetectionRecommendation] = field(default_factory=list)
+    finding_type: str = "attack_narrative"  # "attack_narrative" or "vulnerability"
     kill_chain_analysis: str = ""
     raw_llm_response: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "finding": self.finding,
+            "finding_type": self.finding_type,
             "techniques": [
                 {
                     "attack_id": t.attack_id,
@@ -92,24 +94,35 @@ class AnalysisResult:
 
 # Prompts for classification and remediation
 CLASSIFICATION_SYSTEM_PROMPT = """You are a cybersecurity analyst expert in MITRE ATT&CK framework.
-Your task is to analyze attack narratives and identify which ATT&CK techniques are present.
+Your task is to analyze security findings and identify relevant ATT&CK techniques.
 
 You will be given:
-1. An attack narrative or security finding
+1. A security finding - this may be an attack narrative OR a vulnerability/misconfiguration report
 2. A list of candidate techniques with their descriptions from the ATT&CK knowledge base
 3. Context including: platforms targeted, threat groups known to use each technique, campaigns that have used them, and data sources for detection
 
+IMPORTANT: Handle TWO types of findings differently:
+
+**Attack Narratives** (evidence of actual adversary activity):
+- Identify techniques with clear evidence from the narrative
+- Use confidence levels based on how explicitly the technique is demonstrated
+- Evidence should describe what the attacker DID
+
+**Vulnerability/Misconfiguration Findings** (security weaknesses, no attack yet):
+- Identify techniques that COULD exploit this vulnerability
+- Use confidence levels based on how directly the vulnerability enables the technique
+- Evidence should describe HOW an attacker could leverage this weakness
+- Mark these as "potential" in the evidence field (e.g., "Exposed admin login could enable...")
+
 For each relevant technique, provide:
-- Confidence level (high/medium/low) based on how clearly the technique is evidenced
-- Specific evidence from the narrative that maps to this technique
+- Confidence level (high/medium/low)
+- Specific evidence - either observed behavior OR potential exploitation path
 - The technique's associated tactics
 
 Consider the additional context:
-- If the narrative mentions specific platforms, prioritize techniques targeting those platforms
+- If the finding mentions specific platforms, prioritize techniques targeting those platforms
 - If threat actors or campaigns are mentioned, check if they align with known groups using the techniques
 - Note which data sources would help detect the identified techniques
-
-Be conservative: only identify techniques with clear evidence. Do not speculate.
 
 Output JSON with this structure:
 {
@@ -124,7 +137,8 @@ Output JSON with this structure:
             "detection_data_sources": ["Authentication logs", "Active Directory"]
         }
     ],
-    "kill_chain_analysis": "Brief description of where this fits in the attack lifecycle",
+    "finding_type": "attack_narrative" or "vulnerability",
+    "kill_chain_analysis": "Brief description of where this fits in the attack lifecycle, or potential attack path if vulnerability",
     "reasoning": "Brief explanation of the overall analysis"
 }"""
 
@@ -132,12 +146,17 @@ Output JSON with this structure:
 REMEDIATION_SYSTEM_PROMPT = """You are a cybersecurity remediation expert.
 Given identified ATT&CK techniques and their available mitigations, provide prioritized remediation recommendations.
 
+This applies to BOTH:
+- **Attack narratives**: Remediate the techniques that were used
+- **Vulnerability findings**: Remediate to PREVENT the potential techniques from being exploited
+
 Consider:
 1. Mitigations that address multiple identified techniques should be higher priority
 2. Mitigations with lower implementation complexity are preferable when equally effective
-3. Provide specific, actionable implementation guidance
+3. Provide specific, actionable implementation guidance tailored to the finding
 4. Consider detection capabilities - recommend data sources to collect for ongoing monitoring
 5. If threat groups are identified, consider their known TTPs for additional hardening
+6. For vulnerability findings, focus on preventive controls that close the exposure
 
 Output JSON with this structure:
 {
@@ -220,14 +239,16 @@ class AttackAnalyzer:
         # Step 6: Enrich with group information
         techniques = self._enrich_with_groups(classification, hybrid_result.techniques)
 
-        # Extract kill chain analysis from classification
+        # Extract metadata from classification
         kill_chain_analysis = classification.get("kill_chain_analysis", "")
+        finding_type = classification.get("finding_type", "attack_narrative")
 
         return AnalysisResult(
             finding=finding_text,
             techniques=techniques,
             remediations=remediations,
             detection_recommendations=detection_recs,
+            finding_type=finding_type,
             kill_chain_analysis=kill_chain_analysis,
             raw_llm_response={
                 "classification": classification,
@@ -444,16 +465,21 @@ def print_analysis_result(result: AnalysisResult) -> None:
     """Print analysis result with rich formatting."""
     from rich.markdown import Markdown
 
+    # Determine finding type label
+    is_vulnerability = result.finding_type == "vulnerability"
+    type_label = "[yellow]Vulnerability/Misconfiguration[/yellow]" if is_vulnerability else "[cyan]Attack Narrative[/cyan]"
+
     # Header panel
     console.print(Panel(
-        f"[bold]Finding:[/bold] {result.finding}",
+        f"[bold]Finding:[/bold] {result.finding}\n\n[dim]Type:[/dim] {type_label}",
         title="[bold cyan]ATTACK ANALYSIS[/bold cyan]",
         border_style="cyan",
     ))
 
     # Techniques section
     if result.techniques:
-        console.print("\n[bold cyan]TECHNIQUES IDENTIFIED[/bold cyan]")
+        section_title = "POTENTIAL EXPLOITATION TECHNIQUES" if is_vulnerability else "TECHNIQUES IDENTIFIED"
+        console.print(f"\n[bold cyan]{section_title}[/bold cyan]")
         console.print()
 
         for tech in result.techniques:
