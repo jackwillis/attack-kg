@@ -13,6 +13,7 @@ dependencies = [
     "chromadb>=0.4.22",
     "sentence-transformers>=2.2.2",
     "einops>=0.7.0",  # Required by nomic-embed-text-v1.5
+    "torch>=2.0.0",  # Explicit to prevent transitive dependency issues
 
     # LLM Integration
     "ollama>=0.1.6",
