@@ -38,7 +38,7 @@ uv run attack-kg repl
 uv run attack-kg repl --model gpt-oss:20b  # specify LLM model
 ```
 
-## Interactive REPL
+### Interactive REPL
 
 The REPL provides an interactive session with command history and tab completion:
 
@@ -50,6 +50,27 @@ attack-kg> analyze credential theft via mimikatz
 attack-kg> analyze @finding.txt    # read from file
 attack-kg> sparql SELECT ?name WHERE { ?t a attack:Technique ; rdfs:label ?name } LIMIT 5
 ```
+
+## LLM Model Selection
+
+The default model is `gpt-oss:20b`, selected based on benchmark testing of 10 models on ATT&CK technique identification and remediation quality.
+
+| Use Case | Model | Grade | Notes |
+|----------|-------|-------|-------|
+| Maximum accuracy | `gpt-oss:20b` (default) | A | Best technique coverage |
+| Balanced speed/quality | `gpt-oss-safeguard:20b` | A- | 25% faster |
+| Resource-constrained | `gemma3:4b` | B+ | Best small model |
+| Maximum speed | `granite4:3b` | B | Needs context filtering |
+
+To use a different model:
+```bash
+uv run attack-kg analyze --model gemma3:4b "finding text"
+uv run attack-kg repl --model gpt-oss-safeguard:20b
+```
+
+**Not recommended:** phi3:mini (JSON failures), deepseek-r1 (slow, sparse output)
+
+See `model-comparison-reports/RESULTS.md` for full benchmark results.
 
 ## Environment Variables
 

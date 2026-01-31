@@ -20,8 +20,8 @@ uv run attack-kg search "credential theft"  # Semantic search
 uv run attack-kg analyze "password spraying against Azure AD"  # Full analysis with remediation
 uv run attack-kg analyze --file finding.txt  # Analyze from file
 uv run attack-kg query "SELECT ..."     # Raw SPARQL
-uv run attack-kg repl                   # Interactive mode
-uv run attack-kg repl --model gpt-oss:20b   # REPL with specific model
+uv run attack-kg repl                   # Interactive mode (default: gpt-oss:20b)
+uv run attack-kg repl --model gemma3:4b # REPL with alternate model
 
 # Graph Browser REPL commands (supports readline history + tab completion)
 # Navigation:

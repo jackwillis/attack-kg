@@ -47,7 +47,7 @@ class LLMBackend(ABC):
 class OllamaBackend(LLMBackend):
     """Ollama local LLM backend."""
 
-    def __init__(self, model: str = "llama3.2", host: str | None = None):
+    def __init__(self, model: str = "gpt-oss:20b", host: str | None = None):
         """
         Initialize Ollama backend.
 
@@ -324,7 +324,7 @@ def get_llm_backend(
         Configured LLM backend
     """
     if backend == "ollama":
-        return OllamaBackend(model=model or "llama3.2", **kwargs)
+        return OllamaBackend(model=model or "gpt-oss:20b", **kwargs)
     elif backend == "openai":
         return OpenAIBackend(model=model or "gpt-4o-mini", **kwargs)
     else:
