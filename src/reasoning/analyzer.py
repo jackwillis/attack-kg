@@ -25,7 +25,7 @@ class TechniqueMatch:
 class DefendTechnique:
     """A D3FEND technique nested under a mitigation."""
 
-    defend_id: str
+    d3fend_id: str
     name: str
     implementation: str = ""
 
@@ -39,14 +39,14 @@ class RemediationItem:
     priority: str  # "HIGH", "MEDIUM", "LOW"
     addresses: list[str]  # technique IDs
     implementation: str
-    defend_techniques: list[DefendTechnique] = field(default_factory=list)
+    d3fend_techniques: list[DefendTechnique] = field(default_factory=list)
 
 
 @dataclass
 class DefendRecommendation:
     """A D3FEND defensive technique recommendation."""
 
-    defend_id: str
+    d3fend_id: str
     name: str
     priority: str  # "HIGH", "MEDIUM", "LOW"
     addresses: list[str]  # technique IDs
@@ -98,16 +98,16 @@ class AnalysisResult:
                     "priority": r.priority,
                     "addresses": r.addresses,
                     "implementation": r.implementation,
-                    "defend_techniques": [
-                        {"defend_id": d.defend_id, "name": d.name, "implementation": d.implementation}
-                        for d in r.defend_techniques
-                    ] if r.defend_techniques else [],
+                    "d3fend_techniques": [
+                        {"d3fend_id": d.d3fend_id, "name": d.name, "implementation": d.implementation}
+                        for d in r.d3fend_techniques
+                    ] if r.d3fend_techniques else [],
                 }
                 for r in self.remediations
             ],
             "defend_recommendations": [
                 {
-                    "defend_id": d.defend_id,
+                    "d3fend_id": d.d3fend_id,
                     "name": d.name,
                     "priority": d.priority,
                     "addresses": d.addresses,
@@ -186,7 +186,7 @@ Output JSON with this exact structure (generate in this order - techniques first
     ],
     "defend_recommendations": [
         {
-            "defend_id": "D3-MFA",
+            "d3fend_id": "D3-MFA",
             "name": "Multi-factor Authentication",
             "priority": "HIGH",
             "addresses": ["T1110.003"],
@@ -271,7 +271,7 @@ Analyze this finding and provide:
         techniques = self._enrich_with_groups(result, hybrid_result.techniques)
 
         # Build remediations and merge D3FEND into them
-        remediations, defend_recommendations = self._merge_defend_into_mitigations(
+        remediations, defend_recommendations = self._merge_d3fend_into_mitigations(
             result.get("remediations", []),
             result.get("defend_recommendations", []),
         )
@@ -353,25 +353,25 @@ Analyze this finding and provide:
 
         # Section 3: D3FEND countermeasures
         sections.append("\n\nD3FEND DEFENSIVE TECHNIQUES:")
-        defend_by_id = {}
+        d3fend_by_id = {}
         for tech in techniques:
-            defend_techniques = self.hybrid.graph.get_d3fend_for_technique(tech.attack_id)
-            for d3f in defend_techniques:
-                d3f_id = d3f["defend_id"]
-                if d3f_id not in defend_by_id:
-                    defend_by_id[d3f_id] = {
-                        **dfn,
+            d3fend_techniques = self.hybrid.graph.get_d3fend_for_technique(tech.attack_id)
+            for d3f in d3fend_techniques:
+                d3f_id = d3f["d3fend_id"]  # Key from graph.py
+                if d3f_id not in d3fend_by_id:
+                    d3fend_by_id[d3f_id] = {
+                        **d3f,
                         "addresses": [tech.attack_id],
                         "via_mitigations": [d3f["via_mitigation"]],
                     }
                 else:
-                    if tech.attack_id not in defend_by_id[d3f_id]["addresses"]:
-                        defend_by_id[d3f_id]["addresses"].append(tech.attack_id)
-                    if d3f["via_mitigation"] not in defend_by_id[d3f_id]["via_mitigations"]:
-                        defend_by_id[d3f_id]["via_mitigations"].append(d3f["via_mitigation"])
+                    if tech.attack_id not in d3fend_by_id[d3f_id]["addresses"]:
+                        d3fend_by_id[d3f_id]["addresses"].append(tech.attack_id)
+                    if d3f["via_mitigation"] not in d3fend_by_id[d3f_id]["via_mitigations"]:
+                        d3fend_by_id[d3f_id]["via_mitigations"].append(d3f["via_mitigation"])
 
-        if defend_by_id:
-            for d3f_id, d3f in defend_by_id.items():
+        if d3fend_by_id:
+            for d3f_id, d3f in d3fend_by_id.items():
                 definition = d3f.get("definition", "")
                 if len(definition) > 150:
                     definition = definition[:150] + "..."
@@ -413,10 +413,10 @@ Analyze this finding and provide:
             )
         return matches
 
-    def _merge_defend_into_mitigations(
+    def _merge_d3fend_into_mitigations(
         self,
         raw_remediations: list[dict[str, Any]],
-        raw_defend: list[dict[str, Any]],
+        raw_d3fend: list[dict[str, Any]],
     ) -> tuple[list[RemediationItem], list[DefendRecommendation]]:
         """
         Merge D3FEND recommendations into their parent mitigations.
@@ -431,39 +431,39 @@ Analyze this finding and provide:
         mitigation_ids = {r.get("mitigation_id", "") for r in raw_remediations}
 
         # Partition D3FEND: those with matching mitigations vs standalone
-        defend_by_mitigation: dict[str, list[dict]] = {}
-        standalone_defend: list[dict] = []
+        d3fend_by_mitigation: dict[str, list[dict]] = {}
+        standalone_d3fend: list[dict] = []
 
-        for d in raw_defend:
+        for d in raw_d3fend:
             via_mitigations = d.get("via_mitigations", [])
             matched = False
 
             for mit_id in via_mitigations:
                 if mit_id in mitigation_ids:
-                    if mit_id not in defend_by_mitigation:
-                        defend_by_mitigation[mit_id] = []
-                    defend_by_mitigation[mit_id].append(d)
+                    if mit_id not in d3fend_by_mitigation:
+                        d3fend_by_mitigation[mit_id] = []
+                    d3fend_by_mitigation[mit_id].append(d)
                     matched = True
                     break  # Only nest under first matching mitigation
 
             if not matched and via_mitigations:
                 # D3FEND maps to a mitigation not in our list - still standalone
-                standalone_defend.append(d)
+                standalone_d3fend.append(d)
             elif not via_mitigations:
                 # No mitigation mapping - standalone
-                standalone_defend.append(d)
+                standalone_d3fend.append(d)
 
         # Build remediations with nested D3FEND
         remediations = []
         for r in raw_remediations:
             mit_id = r.get("mitigation_id", "")
-            nested_defend = [
+            nested_d3fend = [
                 DefendTechnique(
-                    defend_id=d.get("defend_id", ""),
+                    d3fend_id=d.get("d3fend_id", ""),
                     name=d.get("name", ""),
                     implementation=d.get("implementation", ""),
                 )
-                for d in defend_by_mitigation.get(mit_id, [])
+                for d in d3fend_by_mitigation.get(mit_id, [])
             ]
 
             remediations.append(
@@ -473,21 +473,21 @@ Analyze this finding and provide:
                     priority=r.get("priority", "MEDIUM"),
                     addresses=r.get("addresses", []),
                     implementation=r.get("implementation", ""),
-                    defend_techniques=nested_defend,
+                    d3fend_techniques=nested_d3fend,
                 )
             )
 
         # Build standalone D3FEND recommendations
         standalone = [
             DefendRecommendation(
-                defend_id=d.get("defend_id", ""),
+                d3fend_id=d.get("d3fend_id", ""),
                 name=d.get("name", ""),
                 priority=d.get("priority", "MEDIUM"),
                 addresses=d.get("addresses", []),
                 implementation=d.get("implementation", ""),
                 via_mitigations=d.get("via_mitigations", []),
             )
-            for d in standalone_defend
+            for d in standalone_d3fend
         ]
 
         return remediations, standalone
@@ -562,12 +562,12 @@ def print_analysis_result(result: AnalysisResult) -> None:
                 console.print(f"   {line}")
 
             # Show nested D3FEND techniques if present
-            if rem.defend_techniques:
-                d3f_ids = ", ".join(d.defend_id for d in rem.defend_techniques)
+            if rem.d3fend_techniques:
+                d3f_ids = ", ".join(d.d3fend_id for d in rem.d3fend_techniques)
                 console.print(f"   [dim]D3FEND:[/dim] {d3f_ids}")
-                for d3f in rem.defend_techniques:
+                for d3f in rem.d3fend_techniques:
                     if d3f.implementation:
-                        console.print(f"      [dim]{d3f.defend_id}:[/dim] {d3f.implementation}")
+                        console.print(f"      [dim]{d3f.d3fend_id}:[/dim] {d3f.implementation}")
 
             console.print()
 
@@ -582,7 +582,7 @@ def print_analysis_result(result: AnalysisResult) -> None:
             )
 
             console.print(
-                f"[bold]{i}. {d3f.name}[/bold] ({d3f.defend_id}) - "
+                f"[bold]{i}. {d3f.name}[/bold] ({d3f.d3fend_id}) - "
                 f"[{priority_color}]{d3f.priority} PRIORITY[/{priority_color}]"
             )
             console.print(f"   [dim]Addresses:[/dim] {', '.join(d3f.addresses)}")
@@ -608,12 +608,12 @@ def print_analysis_result(result: AnalysisResult) -> None:
             console.print()
 
     # Summary footer
-    nested_defend_count = sum(len(r.defend_techniques) for r in result.remediations)
-    total_defend = nested_defend_count + len(result.defend_recommendations)
+    nested_d3fend_count = sum(len(r.d3fend_techniques) for r in result.remediations)
+    total_d3fend = nested_d3fend_count + len(result.defend_recommendations)
 
     if result.remediations or result.defend_recommendations:
         summary_parts = [f"{len(result.techniques)} techniques"]
         summary_parts.append(f"{len(result.remediations)} mitigations")
-        if total_defend > 0:
-            summary_parts.append(f"{total_defend} D3FEND techniques")
+        if total_d3fend > 0:
+            summary_parts.append(f"{total_d3fend} D3FEND techniques")
         console.print(f"[dim]Summary: {', '.join(summary_parts)}[/dim]")
