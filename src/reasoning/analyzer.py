@@ -136,33 +136,79 @@ You will receive:
 1. A security finding (attack narrative OR vulnerability/misconfiguration)
 2. Candidate ATT&CK techniques with descriptions, threat groups, and detection data sources
 3. Available ATT&CK mitigations for those techniques
-4. D3FEND defensive techniques linked to those mitigations (more specific, actionable controls)
+4. D3FEND defensive techniques linked to those mitigations
 
-HANDLE TWO FINDING TYPES:
+═══════════════════════════════════════════════════════════════════════════════
+CONTEXT EXTRACTION (DO THIS FIRST)
+═══════════════════════════════════════════════════════════════════════════════
+
+Before generating recommendations, extract technology indicators from the finding:
+
+1. **Operating System**: Look for paths (/var/www = Linux, C:\\ = Windows), services (systemd, apache2, IIS)
+2. **Products**: Specific software mentioned (ownCloud, FortiOS, Apache, nginx, etc.)
+3. **Environment**: Cloud indicators (AWS, Azure, GCP) vs on-premise (file paths, local services)
+4. **Authentication**: LDAP, Active Directory, SAML, local accounts, SSO providers mentioned
+
+Use ONLY these indicators to scope your recommendations. Do NOT assume enterprise tools (Azure AD, Okta, CrowdStrike) unless the finding explicitly mentions them.
+
+═══════════════════════════════════════════════════════════════════════════════
+FINDING TYPES
+═══════════════════════════════════════════════════════════════════════════════
 
 **Attack Narratives** (evidence of adversary activity):
 - Identify techniques with clear evidence from the narrative
-- Evidence should describe what the attacker DID
+- Evidence describes what the attacker DID
 - Remediations prevent recurrence
 
 **Vulnerability/Misconfiguration Findings** (no attack yet):
 - Identify techniques that COULD exploit this vulnerability
-- Evidence should describe HOW an attacker could leverage this weakness
+- Evidence describes HOW an attacker could leverage this weakness
 - Remediations close the exposure before exploitation
 
-PRIORITIZATION GUIDANCE:
+═══════════════════════════════════════════════════════════════════════════════
+IMPLEMENTATION GUIDANCE RULES (CRITICAL)
+═══════════════════════════════════════════════════════════════════════════════
+
+When writing implementation steps:
+
+DO:
+- Reference the specific product's native features (e.g., "ownCloud's built-in 2FA module")
+- Describe the general location of settings (e.g., "Settings > Security > Two-Factor Authentication")
+- Provide conceptual steps that an admin can follow
+- Use phrases like "Configure [product] to..." or "Enable [feature] in [product]"
+- Mention CLI tools by name if commonly known (e.g., "occ command for ownCloud")
+
+DO NOT:
+- Invent specific configuration file syntax (e.g., config.php arrays) unless you are 100% certain
+- Fabricate command-line flags or API parameters
+- Assume configuration file formats or locations you're not certain about
+- Mix guidance for different products (e.g., Azure AD for self-hosted Linux apps)
+
+WHEN UNCERTAIN about exact syntax or configuration:
+- State the goal clearly: "Configure password complexity requirements"
+- Reference official docs: "Refer to [product] documentation for exact configuration syntax"
+- Describe the admin UI path if known: "Navigate to Admin > Security settings"
+- Avoid inventing specific code/config that could be wrong
+
+═══════════════════════════════════════════════════════════════════════════════
+PRIORITIZATION
+═══════════════════════════════════════════════════════════════════════════════
 
 For ATT&CK Mitigations:
-- HIGH: Directly addresses the primary technique(s), broad coverage
+- HIGH: Directly addresses primary technique(s), broad coverage
 - MEDIUM: Addresses secondary techniques or provides defense-in-depth
 - LOW: Useful but not essential for this specific finding
 
 For D3FEND Techniques:
-- D3FEND provides specific, actionable defensive techniques
-- Prioritize based on how directly they address the identified techniques
-- Include implementation details specific to the finding context
+- Nest under parent mitigation when there's a direct mapping
+- Provide operational/detection-focused guidance (D3FEND is more specific than ATT&CK mitigations)
+- Focus on monitoring, thresholds, and active defense measures
 
-Output JSON with this exact structure (generate in this order - techniques first, then build on that):
+═══════════════════════════════════════════════════════════════════════════════
+OUTPUT FORMAT
+═══════════════════════════════════════════════════════════════════════════════
+
+Output JSON with this exact structure:
 {
     "techniques": [
         {
@@ -174,14 +220,14 @@ Output JSON with this exact structure (generate in this order - techniques first
         }
     ],
     "finding_type": "attack_narrative" or "vulnerability",
-    "kill_chain_analysis": "Brief description of attack lifecycle position or potential attack path",
+    "kill_chain_analysis": "Brief attack lifecycle description",
     "remediations": [
         {
             "mitigation_id": "M1032",
             "name": "Multi-factor Authentication",
             "priority": "HIGH",
             "addresses": ["T1110.003"],
-            "implementation": "Specific steps to implement this mitigation for this finding"
+            "implementation": "1. Enable [product]'s built-in 2FA feature. 2. Require 2FA for admin accounts. 3. Configure via Admin > Security settings."
         }
     ],
     "defend_recommendations": [
@@ -190,24 +236,32 @@ Output JSON with this exact structure (generate in this order - techniques first
             "name": "Multi-factor Authentication",
             "priority": "HIGH",
             "addresses": ["T1110.003"],
-            "implementation": "Specific D3FEND technique implementation guidance",
+            "implementation": "Deploy TOTP-based MFA using [product]'s native 2FA module or compatible authenticator apps.",
             "via_mitigations": ["M1032"]
         }
     ],
     "detection_recommendations": [
         {
             "data_source": "Authentication Logs",
-            "rationale": "Why this data source helps detect the identified techniques",
+            "rationale": "Why this helps detect the identified techniques",
             "techniques_covered": ["T1110.003"]
         }
     ]
 }
 
-IMPORTANT:
-- Only include techniques with clear evidence or strong potential for exploitation
-- Provide specific, actionable implementation guidance (not generic advice)
-- D3FEND techniques are more specific than ATT&CK mitigations - leverage this for detailed guidance
-- CRITICAL: Read the finding carefully for technology indicators (file paths, services, product names, commands). Tailor ALL recommendations to the actual environment. Do NOT suggest Windows solutions for Linux systems, cloud solutions for on-premise systems, or enterprise tools for specific products that have their own solutions."""
+CONSISTENCY RULE: The "addresses" and "techniques_covered" fields in remediations, defend_recommendations, and detection_recommendations must ONLY contain technique IDs that appear in your "techniques" array. Do not reference techniques you did not identify.
+
+═══════════════════════════════════════════════════════════════════════════════
+FINAL CHECKLIST
+═══════════════════════════════════════════════════════════════════════════════
+
+Before outputting, verify:
+- All recommendations match the detected OS/product (no Windows advice for Linux)
+- No invented configuration syntax or file formats
+- Implementation steps are actionable but not falsely specific
+- D3FEND techniques are nested under relevant mitigations where applicable
+- Techniques have clear evidence tied to the finding text
+- CRITICAL: Remediations and D3FEND "addresses" fields ONLY reference technique IDs that appear in your "techniques" list. Do not reference techniques you did not identify."""
 
 
 class AttackAnalyzer:
