@@ -207,7 +207,7 @@ IMPORTANT:
 - Only include techniques with clear evidence or strong potential for exploitation
 - Provide specific, actionable implementation guidance (not generic advice)
 - D3FEND techniques are more specific than ATT&CK mitigations - leverage this for detailed guidance
-- Consider the organization's likely environment based on the finding context"""
+- CRITICAL: Read the finding carefully for technology indicators (file paths, services, product names, commands). Tailor ALL recommendations to the actual environment. Do NOT suggest Windows solutions for Linux systems, cloud solutions for on-premise systems, or enterprise tools for specific products that have their own solutions."""
 
 
 class AttackAnalyzer:
