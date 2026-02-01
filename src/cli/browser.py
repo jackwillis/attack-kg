@@ -20,6 +20,7 @@ ENTITY_TYPE_PREFIXES = {
     "C": "campaign",
     "TA": "tactic",
     "DS": "data_source",
+    "D3": "d3fend",
 }
 
 
@@ -27,11 +28,13 @@ def detect_entity_type(attack_id: str) -> str | None:
     """Detect entity type from ATT&CK ID prefix."""
     attack_id = attack_id.upper()
 
-    # Check two-character prefixes first (TA, DS)
+    # Check two-character prefixes first (TA, DS, D3)
     if attack_id.startswith("TA"):
         return "tactic"
     if attack_id.startswith("DS"):
         return "data_source"
+    if attack_id.startswith("D3-") or attack_id.startswith("D3"):
+        return "d3fend"
 
     # Check single-character prefixes
     if attack_id and attack_id[0] in ENTITY_TYPE_PREFIXES:
@@ -361,3 +364,20 @@ Provide a helpful, specific answer in the context of this entity. Reference spec
     def at_root(self) -> bool:
         """Check if at root level."""
         return self.state.current_id is None
+
+    def get_countermeasures(self) -> list[dict[str, Any]]:
+        """
+        Get D3FEND countermeasures for the current technique.
+
+        Returns:
+            List of D3FEND techniques or empty list if not on a technique
+        """
+        if self.state.current_type != "technique":
+            return []
+
+        return self.graph.get_d3fend_for_technique(self.state.current_id)
+
+    def has_d3fend(self) -> bool:
+        """Check if D3FEND data is loaded."""
+        stats = self.graph.get_d3fend_stats()
+        return stats.get("d3fend_techniques", 0) > 0

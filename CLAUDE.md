@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 uv sync
 
 # Data pipeline (run in order for first setup)
-uv run attack-kg download    # Download STIX from MITRE GitHub
+uv run attack-kg download    # Download STIX + D3FEND (use --skip-d3fend to omit)
 uv run attack-kg ingest      # Convert STIX → RDF (N-Triples)
 uv run attack-kg build       # Load into Oxigraph + build ChromaDB vectors
 
@@ -19,6 +19,7 @@ uv run attack-kg group APT29            # Group techniques
 uv run attack-kg search "credential theft"  # Semantic search
 uv run attack-kg analyze "password spraying against Azure AD"  # Full analysis with remediation
 uv run attack-kg analyze --file finding.txt  # Analyze from file
+uv run attack-kg countermeasures T1110.003  # Get D3FEND countermeasures for technique
 uv run attack-kg query "SELECT ..."     # Raw SPARQL
 uv run attack-kg repl                   # Interactive mode (default: gpt-oss:20b)
 uv run attack-kg repl --model gemma3:4b # REPL with alternate model
@@ -36,6 +37,9 @@ uv run attack-kg repl --model gemma3:4b # REPL with alternate model
 #   ask <question>   - Ask LLM about current entity in context
 #   analyze <text>   - Analyze finding for techniques & remediation
 #   analyze @<file>  - Analyze finding from file
+#
+# D3FEND:
+#   countermeasures  - Show D3FEND countermeasures for current technique
 #
 # Advanced:
 #   sparql <query>   - Execute raw SPARQL query
@@ -78,6 +82,8 @@ STIX JSON → StixToRdfConverter → N-Triples → Oxigraph (SPARQL)
 - **`src/ingest/embeddings.py`** - Generates embeddings with sentence-transformers (nomic-embed-text-v1.5, 8K token context), stores in ChromaDB.
 
 - **`src/query/hybrid.py`** - `HybridQueryEngine` combines semantic search results with SPARQL graph enrichment.
+
+- **`src/ingest/d3fend.py`** - Downloads MITRE D3FEND ontology (TTL format) for defensive technique mapping.
 
 ### Supported Entity Types
 
@@ -125,6 +131,10 @@ The system processes these STIX entity types into the RDF graph:
 - `get_relationships(attack_id)` - Get all relationships for an entity
 - `find_related_to_finding(finding_text)` - Find all related entities for a finding
 
+**D3FEND Integration:**
+- `get_defenses_with_d3fend(attack_id)` - Get ATT&CK mitigations + D3FEND countermeasures
+- `find_defenses_for_finding_with_d3fend(finding)` - Enhanced defense finder with D3FEND
+
 ## Technical Notes
 
 **SPARQL URI handling**: ATT&CK IDs containing dots (T1110.003) break SPARQL prefix notation. Always use full URIs:
@@ -142,3 +152,9 @@ sparql = f"{tech_uri} ..."
 **Data loading**: `bulk_load` must specify `to_graph=pyoxigraph.DefaultGraph()` or data goes into a named graph and queries return empty.
 
 **Subtechnique Mitigation Inheritance**: When querying mitigations for subtechniques (e.g., T1059.001 PowerShell), the system automatically includes mitigations from the parent technique (T1059 Command and Scripting Interpreter). This is handled by `get_mitigations_with_inheritance()` in `graph.py`. Inherited mitigations are marked with `inherited: true` in the response and displayed with an `[inherited]` marker in the CLI and REPL.
+
+**D3FEND Integration**: MITRE D3FEND ontology can be loaded alongside ATT&CK to provide detailed defensive technique recommendations. D3FEND techniques are linked to ATT&CK via mitigation IDs (e.g., M1032 → D3-MFA). Key methods in `graph.py`:
+- `load_d3fend(path)` - Load D3FEND TTL into the store
+- `get_d3fend_technique(d3fend_id)` - Get D3FEND technique details (e.g., D3-MFA)
+- `get_d3fend_for_mitigation(mitigation_id)` - Get D3FEND techniques for an ATT&CK mitigation
+- `get_d3fend_for_technique(attack_id)` - Get all D3FEND countermeasures for a technique (via mitigations)

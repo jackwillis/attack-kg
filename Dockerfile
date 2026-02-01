@@ -19,6 +19,9 @@
 #
 #   JSON output:
 #     docker run --network host attack-kg analyze --json "Lateral movement via RDP"
+#
+# D3FEND countermeasures:
+#   docker run attack-kg countermeasures T1110.003
 
 # Stage 1: Build with all deps, swap torch for CPU version
 FROM python:3.12-slim AS builder

@@ -129,6 +129,11 @@ dev = [
     { name = "pytest-asyncio" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "chromadb", specifier = ">=0.4.22" },
@@ -149,6 +154,9 @@ requires-dist = [
     { name = "typer", specifier = ">=0.9.0" },
 ]
 provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=9.0.2" }]
 
 [[package]]
 name = "attrs"

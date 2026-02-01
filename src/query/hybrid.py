@@ -1297,3 +1297,107 @@ class HybridQueryEngine:
                 "campaigns_related": len(sorted_campaigns),
             },
         }
+
+    # -------------------------------------------------------------------------
+    # D3FEND integration
+    # -------------------------------------------------------------------------
+
+    def get_defenses_with_d3fend(
+        self,
+        attack_id: str,
+    ) -> dict[str, Any]:
+        """
+        Get ATT&CK mitigations + D3FEND countermeasures for a technique.
+
+        Combines traditional ATT&CK mitigations with detailed D3FEND
+        defensive techniques for comprehensive defense recommendations.
+
+        Args:
+            attack_id: ATT&CK technique ID (e.g., T1110.003)
+
+        Returns:
+            Dictionary with mitigations and D3FEND countermeasures
+        """
+        tech_info = self.graph.get_technique(attack_id)
+        if not tech_info:
+            return {"error": f"Technique not found: {attack_id}"}
+
+        # Get ATT&CK mitigations
+        mitigations = self.graph.get_mitigations_with_inheritance(attack_id)
+
+        # Get D3FEND countermeasures
+        d3fend_techniques = self.graph.get_d3fend_for_technique(attack_id)
+
+        # Get D3FEND stats to check if loaded
+        d3fend_stats = self.graph.get_d3fend_stats()
+
+        return {
+            "technique": {
+                "attack_id": attack_id,
+                "name": tech_info.get("name", ""),
+            },
+            "mitigations": mitigations,
+            "d3fend_countermeasures": d3fend_techniques,
+            "d3fend_loaded": d3fend_stats.get("d3fend_techniques", 0) > 0,
+            "summary": {
+                "mitigation_count": len(mitigations),
+                "d3fend_count": len(d3fend_techniques),
+            },
+        }
+
+    def find_defenses_for_finding_with_d3fend(
+        self,
+        finding_text: str,
+        top_k: int = 3,
+    ) -> dict[str, Any]:
+        """
+        Enhanced defense finder including D3FEND countermeasures.
+
+        Given a finding, identifies techniques, mitigations, and D3FEND
+        countermeasures for comprehensive remediation.
+
+        Args:
+            finding_text: Description of a security finding
+            top_k: Number of techniques to consider
+
+        Returns:
+            Dictionary with techniques, mitigations, and D3FEND countermeasures
+        """
+        # Get basic defenses
+        basic_result = self.find_defenses_for_finding(finding_text, top_k=top_k)
+
+        # Consolidate D3FEND countermeasures across all techniques
+        all_d3fend: dict[str, dict] = {}
+
+        for tech in basic_result["techniques"]:
+            d3fend_techniques = self.graph.get_d3fend_for_technique(tech["attack_id"])
+            for d3f in d3fend_techniques:
+                d3fend_id = d3f["d3fend_id"]
+                if d3fend_id not in all_d3fend:
+                    all_d3fend[d3fend_id] = {
+                        **d3f,
+                        "addresses_techniques": [tech["attack_id"]],
+                    }
+                else:
+                    all_d3fend[d3fend_id]["addresses_techniques"].append(tech["attack_id"])
+
+        # Sort D3FEND by how many techniques they address
+        sorted_d3fend = sorted(
+            all_d3fend.values(),
+            key=lambda d: len(d["addresses_techniques"]),
+            reverse=True,
+        )
+
+        # Get D3FEND stats
+        d3fend_stats = self.graph.get_d3fend_stats()
+
+        return {
+            **basic_result,
+            "d3fend_countermeasures": sorted_d3fend,
+            "d3fend_loaded": d3fend_stats.get("d3fend_techniques", 0) > 0,
+            "summary": {
+                "techniques_found": len(basic_result["techniques"]),
+                "mitigations_count": len(basic_result["recommended_mitigations"]),
+                "d3fend_count": len(sorted_d3fend),
+            },
+        }

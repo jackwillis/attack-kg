@@ -938,3 +938,223 @@ class AttackGraph:
         ORDER BY ?attackId
         """
         return [{"attack_id": r["attackId"], "name": r["name"]} for r in self.query(sparql)]
+
+    # -------------------------------------------------------------------------
+    # D3FEND integration
+    # -------------------------------------------------------------------------
+
+    def load_d3fend(self, path: Path | str, force: bool = False) -> int:
+        """
+        Load D3FEND TTL ontology into the store.
+
+        Args:
+            path: Path to D3FEND TTL file
+            force: Force reload even if D3FEND data exists
+
+        Returns:
+            Number of triples loaded
+        """
+        import time
+        import pyoxigraph
+
+        path = Path(path)
+        before = len(self._store)
+
+        # Check if D3FEND is already loaded by looking for D3FEND namespace
+        check_sparql = """
+        PREFIX d3f: <http://d3fend.mitre.org/ontologies/d3fend.owl#>
+        SELECT (COUNT(*) AS ?count) WHERE {
+            ?s ?p ?o .
+            FILTER(STRSTARTS(STR(?s), "http://d3fend.mitre.org"))
+        }
+        """
+        existing = self.query(check_sparql)
+        existing_count = int(existing[0].get("count", 0)) if existing else 0
+
+        if existing_count > 0 and not force:
+            console.print(f"[green]D3FEND already loaded ({existing_count} triples), skipping[/green]")
+            console.print(f"[dim](use --force to reload)[/dim]")
+            return 0
+
+        console.print(f"[blue]Loading D3FEND from {path}...[/blue]")
+        start = time.time()
+
+        # Load TTL format into default graph
+        with open(path, "rb") as f:
+            self._store.bulk_load(f, pyoxigraph.RdfFormat.TURTLE, to_graph=pyoxigraph.DefaultGraph())
+
+        after = len(self._store)
+        parse_time = time.time() - start
+        loaded = after - before
+        console.print(f"[green]Loaded {loaded} D3FEND triples in {parse_time:.1f}s[/green]")
+        return loaded
+
+    def get_d3fend_technique(self, d3fend_id: str) -> dict[str, Any] | None:
+        """
+        Get D3FEND technique details by ID (e.g., D3-MFA).
+
+        Args:
+            d3fend_id: D3FEND technique ID (e.g., D3-MFA, D3-AL)
+
+        Returns:
+            Dictionary with technique details or None if not found
+        """
+        sparql = f"""
+        PREFIX d3f: <http://d3fend.mitre.org/ontologies/d3fend.owl#>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+        SELECT ?name ?definition ?category WHERE {{
+            ?tech d3f:d3fend-id "{d3fend_id}" ;
+                  rdfs:label ?name .
+            OPTIONAL {{ ?tech d3f:definition ?definition }}
+            OPTIONAL {{
+                ?tech rdfs:subClassOf ?parent .
+                ?parent rdfs:label ?category .
+            }}
+        }}
+        LIMIT 1
+        """
+        results = self.query(sparql)
+        if results:
+            r = results[0]
+            return {
+                "d3fend_id": d3fend_id,
+                "name": r.get("name", ""),
+                "definition": r.get("definition", ""),
+                "category": r.get("category", ""),
+            }
+        return None
+
+    def get_d3fend_for_mitigation(self, mitigation_id: str) -> list[dict[str, Any]]:
+        """
+        Get D3FEND techniques linked to an ATT&CK mitigation.
+
+        D3FEND uses the mitigation ID in its 'related' predicate to link
+        defensive techniques to ATT&CK mitigations.
+
+        Args:
+            mitigation_id: ATT&CK mitigation ID (e.g., M1032)
+
+        Returns:
+            List of D3FEND techniques with their details
+        """
+        # D3FEND references mitigations via d3f:related predicate
+        # The mitigation is represented as d3f:{mitigation_id}
+        sparql = f"""
+        PREFIX d3f: <http://d3fend.mitre.org/ontologies/d3fend.owl#>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+        SELECT DISTINCT ?d3fendId ?name ?definition WHERE {{
+            ?tech d3f:d3fend-id ?d3fendId ;
+                  rdfs:label ?name .
+            {{
+                ?tech d3f:related d3f:{mitigation_id} .
+            }}
+            UNION
+            {{
+                d3f:{mitigation_id} d3f:related ?tech .
+            }}
+            OPTIONAL {{ ?tech d3f:definition ?definition }}
+            FILTER(STRSTARTS(?d3fendId, "D3-"))
+        }}
+        ORDER BY ?name
+        """
+        results = self.query(sparql)
+        return [
+            {
+                "d3fend_id": r["d3fendId"],
+                "name": r["name"],
+                "definition": r.get("definition", ""),
+            }
+            for r in results
+        ]
+
+    def get_d3fend_for_technique(self, attack_id: str) -> list[dict[str, Any]]:
+        """
+        Get D3FEND countermeasures for an ATT&CK technique.
+
+        This works by:
+        1. Getting mitigations for the technique (with inheritance for subtechniques)
+        2. For each mitigation, finding linked D3FEND techniques
+
+        Args:
+            attack_id: ATT&CK technique ID (e.g., T1110.003)
+
+        Returns:
+            List of D3FEND techniques with via_mitigation context
+        """
+        # Get mitigations with inheritance for subtechniques
+        mitigations = self.get_mitigations_with_inheritance(attack_id)
+
+        d3fend_results = []
+        seen_d3fend_ids = set()
+
+        for mit in mitigations:
+            mit_id = mit["attack_id"]
+            d3fend_techniques = self.get_d3fend_for_mitigation(mit_id)
+
+            for d3f in d3fend_techniques:
+                d3fend_id = d3f["d3fend_id"]
+                if d3fend_id not in seen_d3fend_ids:
+                    seen_d3fend_ids.add(d3fend_id)
+                    d3fend_results.append({
+                        **d3f,
+                        "via_mitigation": mit_id,
+                        "via_mitigation_name": mit["name"],
+                        "inherited": mit.get("inherited", False),
+                    })
+                else:
+                    # Add additional mitigation reference
+                    for existing in d3fend_results:
+                        if existing["d3fend_id"] == d3fend_id:
+                            if "additional_mitigations" not in existing:
+                                existing["additional_mitigations"] = []
+                            existing["additional_mitigations"].append({
+                                "mitigation_id": mit_id,
+                                "name": mit["name"],
+                            })
+                            break
+
+        return d3fend_results
+
+    def get_all_d3fend_techniques(self, limit: int = 100) -> list[dict[str, str]]:
+        """
+        Get all D3FEND techniques.
+
+        Args:
+            limit: Maximum number of results
+
+        Returns:
+            List of D3FEND techniques with basic info
+        """
+        sparql = f"""
+        PREFIX d3f: <http://d3fend.mitre.org/ontologies/d3fend.owl#>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+        SELECT ?d3fendId ?name WHERE {{
+            ?tech d3f:d3fend-id ?d3fendId ;
+                  rdfs:label ?name .
+            FILTER(STRSTARTS(?d3fendId, "D3-"))
+        }}
+        ORDER BY ?d3fendId
+        LIMIT {limit}
+        """
+        return [
+            {"d3fend_id": r["d3fendId"], "name": r["name"]}
+            for r in self.query(sparql)
+        ]
+
+    def get_d3fend_stats(self) -> dict[str, int]:
+        """Get count of D3FEND entities loaded."""
+        sparql = """
+        PREFIX d3f: <http://d3fend.mitre.org/ontologies/d3fend.owl#>
+
+        SELECT (COUNT(DISTINCT ?tech) AS ?techniques) WHERE {
+            ?tech d3f:d3fend-id ?id .
+            FILTER(STRSTARTS(?id, "D3-"))
+        }
+        """
+        results = self.query(sparql)
+        if results:
+            return {"d3fend_techniques": int(results[0].get("techniques", 0))}
+        return {"d3fend_techniques": 0}

@@ -25,13 +25,18 @@ def download(
     domain: str = typer.Option("enterprise", help="ATT&CK domain: enterprise, ics, or mobile"),
     output_dir: Path = typer.Option(DEFAULT_DATA_DIR, help="Output directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Re-download even if exists"),
+    skip_d3fend: bool = typer.Option(False, "--skip-d3fend", help="Skip downloading D3FEND ontology"),
 ):
-    """Download MITRE ATT&CK STIX data from GitHub."""
+    """Download MITRE ATT&CK STIX data and D3FEND ontology."""
     from src.ingest.download import download_attack_data, load_stix_bundle, print_stix_summary
 
     data_file = download_attack_data(output_dir, domain, force)
     bundle = load_stix_bundle(data_file)
     print_stix_summary(bundle)
+
+    if not skip_d3fend:
+        from src.ingest.d3fend import download_d3fend
+        download_d3fend(output_dir, force=force)
 
 
 @app.command()
@@ -63,6 +68,7 @@ def build(
     graph_dir: Path = typer.Option(DEFAULT_GRAPH_DIR, help="Oxigraph store directory"),
     vector_dir: Path = typer.Option(DEFAULT_VECTOR_DIR, help="ChromaDB store directory"),
     skip_vectors: bool = typer.Option(False, help="Skip building vector store"),
+    skip_d3fend: bool = typer.Option(False, help="Skip loading D3FEND ontology"),
     force_reload: bool = typer.Option(False, "--force", "-f", help="Force reload even if store has data"),
 ):
     """Build the knowledge graph and vector store from RDF."""
@@ -98,17 +104,30 @@ def build(
     graph = AttackGraph(graph_dir)
     graph.load_from_file(rdf_file, format=fmt, force=force_reload)
 
+    # Load D3FEND if available
+    if not skip_d3fend:
+        d3fend_file = DEFAULT_DATA_DIR / "d3fend.ttl"
+        if d3fend_file.exists():
+            console.print("\n[bold]Loading D3FEND ontology...[/bold]")
+            graph.load_d3fend(d3fend_file, force=force_reload)
+        else:
+            console.print("\n[dim]D3FEND not found. Run 'attack-kg download && attack-kg build' to enable.[/dim]")
+
     # Print stats
     stats = graph.get_stats()
-    console.print(Panel(
+    d3fend_stats = graph.get_d3fend_stats()
+    stats_text = (
         f"Techniques: {stats.get('techniques', 0)}\n"
         f"Groups: {stats.get('groups', 0)}\n"
         f"Software: {stats.get('software', 0)}\n"
         f"Mitigations: {stats.get('mitigations', 0)}\n"
         f"Tactics: {stats.get('tactics', 0)}\n"
-        f"Total triples: {stats.get('total_triples', 0)}",
-        title="Knowledge Graph Stats",
-    ))
+        f"Total triples: {stats.get('total_triples', 0)}"
+    )
+    if d3fend_stats.get("d3fend_techniques", 0) > 0:
+        stats_text += f"\n\nD3FEND Techniques: {d3fend_stats['d3fend_techniques']}"
+
+    console.print(Panel(stats_text, title="Knowledge Graph Stats"))
 
     if not skip_vectors:
         console.print("\n[bold]Building vector store (this may take 1-2 minutes)...[/bold]")
@@ -206,6 +225,80 @@ def technique(
         console.print(f"\n[bold]Sub-techniques:[/bold]")
         for st in subtechs:
             console.print(f"  • {st['name']} ({st['attack_id']})")
+
+
+@app.command()
+def countermeasures(
+    attack_id: str = typer.Argument(..., help="ATT&CK technique ID (e.g., T1110.003)"),
+    graph_dir: Path = typer.Option(DEFAULT_GRAPH_DIR, help="Oxigraph store directory"),
+    show_mitigations: bool = typer.Option(True, help="Also show ATT&CK mitigations"),
+):
+    """Get D3FEND countermeasures for an ATT&CK technique.
+
+    Shows defensive techniques from MITRE D3FEND that address the specified
+    ATT&CK technique via its mitigations.
+
+    Examples:
+        attack-kg countermeasures T1110.003
+        attack-kg countermeasures T1059.001
+    """
+    from src.store.graph import AttackGraph
+
+    graph = AttackGraph(graph_dir)
+
+    # Check if D3FEND is loaded
+    d3fend_stats = graph.get_d3fend_stats()
+    if d3fend_stats.get("d3fend_techniques", 0) == 0:
+        console.print("[yellow]D3FEND not loaded.[/yellow]")
+        console.print("Run 'attack-kg download && attack-kg build' to enable.")
+        raise typer.Exit(1)
+
+    # Get the technique first
+    tech = graph.get_technique(attack_id)
+    if not tech:
+        console.print(f"[red]Technique not found:[/red] {attack_id}")
+        raise typer.Exit(1)
+
+    console.print(Panel(
+        f"[bold]{tech['name']}[/bold] ({attack_id})",
+        title="Countermeasures",
+    ))
+
+    # Show ATT&CK mitigations if requested
+    if show_mitigations:
+        mitigations = graph.get_mitigations_with_inheritance(attack_id)
+        if mitigations:
+            console.print(f"\n[bold]ATT&CK Mitigations:[/bold]")
+            for m in mitigations:
+                inherited_marker = " [dim][inherited][/dim]" if m.get("inherited") else ""
+                console.print(f"  • {m['name']} ({m['attack_id']}){inherited_marker}")
+
+    # Get D3FEND countermeasures
+    d3fend_techniques = graph.get_d3fend_for_technique(attack_id)
+
+    if d3fend_techniques:
+        console.print(f"\n[bold]D3FEND Countermeasures:[/bold]")
+        for d3f in d3fend_techniques:
+            inherited_marker = " [dim][inherited][/dim]" if d3f.get("inherited") else ""
+            console.print(f"  • [cyan]{d3f['d3fend_id']}[/cyan] {d3f['name']}")
+            console.print(f"    [dim]via {d3f['via_mitigation']} ({d3f['via_mitigation_name']}){inherited_marker}[/dim]")
+            if d3f.get("definition"):
+                # Truncate long definitions
+                definition = d3f["definition"]
+                if len(definition) > 200:
+                    definition = definition[:200] + "..."
+                console.print(f"    [dim]{definition}[/dim]")
+
+            # Show additional mitigations if any
+            additional = d3f.get("additional_mitigations", [])
+            if additional:
+                for add in additional:
+                    console.print(f"    [dim]also via {add['mitigation_id']} ({add['name']})[/dim]")
+    else:
+        console.print(f"\n[yellow]No D3FEND countermeasures found for {attack_id}[/yellow]")
+        console.print("[dim]This may mean no mitigations are linked to D3FEND techniques.[/dim]")
+
+    console.print(f"\n[dim]Total: {len(d3fend_techniques)} D3FEND techniques[/dim]")
 
 
 @app.command()
@@ -361,7 +454,7 @@ def repl(
 
     # Set up tab completion
     commands = [
-        "search", "cd", "back", "pwd", "ls", "info", "ask",
+        "search", "cd", "back", "pwd", "ls", "info", "ask", "countermeasures",
         "sparql", "tech", "group", "analyze", "quit", "exit", "help",
     ]
 
@@ -421,6 +514,9 @@ def repl(
             "  ask <question>     - Ask a question in context of current entity\n"
             "  analyze <text>     - Analyze finding for techniques & remediation\n"
             "  analyze @<file>    - Analyze finding from file\n"
+            "\n"
+            "[bold]D3FEND:[/bold]\n"
+            "  countermeasures    - Show D3FEND countermeasures for current technique\n"
             "\n"
             "[bold]Advanced:[/bold]\n"
             "  sparql <query>     - Execute raw SPARQL query\n"
@@ -617,6 +713,37 @@ def repl(
                     print_analysis_result(result)
                 except Exception as e:
                     console.print(f"[red]Analysis error:[/red] {e}")
+
+        elif cmd == "countermeasures":
+            if browser.at_root:
+                console.print("[yellow]Navigate to a technique first (cd T1110.003)[/yellow]")
+                continue
+
+            if browser.current_type != "technique":
+                console.print(f"[yellow]Countermeasures only available for techniques, not {browser.current_type}[/yellow]")
+                continue
+
+            if not browser.has_d3fend():
+                console.print("[yellow]D3FEND not loaded.[/yellow]")
+                console.print("[dim]Run 'attack-kg download && attack-kg build' to enable.[/dim]")
+                continue
+
+            d3fend_techniques = browser.get_countermeasures()
+            if d3fend_techniques:
+                console.print(f"\n[bold]D3FEND Countermeasures for {browser.current_id}:[/bold]")
+                console.print("━" * 50)
+                for d3f in d3fend_techniques:
+                    inherited_marker = " [dim][inherited][/dim]" if d3f.get("inherited") else ""
+                    console.print(f"  [cyan]{d3f['d3fend_id']}[/cyan] {d3f['name']}")
+                    console.print(f"    [dim]via {d3f['via_mitigation']} ({d3f['via_mitigation_name']}){inherited_marker}[/dim]")
+                    if d3f.get("definition"):
+                        definition = d3f["definition"]
+                        if len(definition) > 150:
+                            definition = definition[:150] + "..."
+                        console.print(f"    [dim]{definition}[/dim]")
+                console.print(f"\n[dim]Total: {len(d3fend_techniques)} D3FEND techniques[/dim]")
+            else:
+                console.print(f"[yellow]No D3FEND countermeasures found for {browser.current_id}[/yellow]")
 
         else:
             console.print(f"[yellow]Unknown command: {cmd}. Type 'help' for available commands.[/yellow]")

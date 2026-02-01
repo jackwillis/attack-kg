@@ -1,6 +1,6 @@
 # ATT&CK Knowledge Graph
 
-A neuro-symbolic system combining MITRE ATT&CK as an RDF knowledge graph with vector embeddings for intelligent threat intelligence querying.
+A neuro-symbolic system combining MITRE ATT&CK and D3FEND as an RDF knowledge graph with vector embeddings for intelligent threat intelligence querying and defensive recommendations.
 
 ## Quick Start
 
@@ -8,10 +8,10 @@ A neuro-symbolic system combining MITRE ATT&CK as an RDF knowledge graph with ve
 # Install dependencies
 uv sync
 
-# Download ATT&CK data and build stores
-uv run attack-kg download    # Download STIX data from MITRE
-uv run attack-kg ingest      # Convert to RDF (N-Triples)
-uv run attack-kg build       # Load into Oxigraph + build vector store
+# Download ATT&CK and D3FEND data, build stores
+uv run attack-kg download           # Download STIX + D3FEND ontology
+uv run attack-kg ingest             # Convert ATT&CK to RDF (N-Triples)
+uv run attack-kg build              # Load into Oxigraph + build vector store
 ```
 
 ## Usage
@@ -25,6 +25,9 @@ uv run attack-kg group APT29
 
 # Semantic search
 uv run attack-kg search "credential theft from memory"
+
+# Get D3FEND countermeasures for a technique
+uv run attack-kg countermeasures T1110.003
 
 # Analyze a finding for ATT&CK techniques and remediation
 uv run attack-kg analyze "password spraying against Azure AD"
@@ -44,12 +47,29 @@ The REPL provides an interactive session with command history and tab completion
 
 ```
 attack-kg> search password spraying
-attack-kg> tech T1110.003
+attack-kg> cd T1110.003
+attack-kg> countermeasures           # show D3FEND countermeasures
 attack-kg> group APT29
 attack-kg> analyze credential theft via mimikatz
-attack-kg> analyze @finding.txt    # read from file
+attack-kg> analyze @finding.txt      # read from file
 attack-kg> sparql SELECT ?name WHERE { ?t a attack:Technique ; rdfs:label ?name } LIMIT 5
 ```
+
+## D3FEND Integration
+
+[MITRE D3FEND](https://d3fend.mitre.org/) provides a knowledge graph of defensive techniques. This system links D3FEND to ATT&CK via mitigation mappings, enabling queries like "what specific countermeasures address T1110.003?"
+
+```bash
+# Get D3FEND countermeasures for a technique
+uv run attack-kg countermeasures T1110.003
+
+# Output shows:
+# - ATT&CK mitigations (e.g., M1032 Multi-factor Authentication)
+# - D3FEND techniques (e.g., D3-MFA) with implementation guidance
+# - Which mitigation each D3FEND technique addresses
+```
+
+The `analyze` command automatically includes D3FEND recommendations alongside ATT&CK mitigations when D3FEND is loaded.
 
 ## LLM Model Selection
 
@@ -89,10 +109,11 @@ See `model-comparison-reports/RESULTS.md` for full benchmark results.
 ## Data
 
 After running `build`, the knowledge graph contains:
-- ~800 techniques with descriptions, tactics, platforms
+- ~800 ATT&CK techniques with descriptions, tactics, platforms
 - ~180 threat groups with technique mappings
 - ~600 software/malware entries
-- ~40 mitigations
+- ~270 mitigations
+- ~500 D3FEND defensive techniques (when loaded)
 - 52,000+ RDF triples total
 
 ## Features
@@ -110,18 +131,29 @@ uv run attack-kg technique T1059.001
 
 Inherited mitigations are marked with `[inherited]` in CLI output and with `inherited: true` in JSON responses.
 
+### D3FEND Countermeasure Mapping
+
+D3FEND techniques are linked to ATT&CK through mitigations. When you query countermeasures for a technique:
+
+1. The system finds all mitigations for that technique (including inherited ones for subtechniques)
+2. For each mitigation, it finds linked D3FEND defensive techniques
+3. Results show which D3FEND technique addresses which ATT&CK technique, via which mitigation
+
 ## Project Structure
 
 ```
 src/
-  cli.py           # Typer CLI
+  main.py          # Typer CLI
   ingest/
     download.py    # STIX data download
+    d3fend.py      # D3FEND ontology download
     stix_to_rdf.py # STIX → RDF conversion
     embeddings.py  # Vector embedding generation
   store/
-    graph.py       # Oxigraph wrapper
+    graph.py       # Oxigraph wrapper (ATT&CK + D3FEND)
     vectors.py     # ChromaDB wrapper
   query/
     hybrid.py      # Combined graph + vector queries
+  reasoning/
+    analyzer.py    # LLM-based attack analysis
 ```
