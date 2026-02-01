@@ -1075,6 +1075,8 @@ class HybridQueryEngine:
         Returns:
             Dictionary with all related entities organized by relationship type
         """
+        from src.logging import log_graph_connection
+
         # Auto-detect type
         if entity_type is None:
             if attack_id.startswith("T"):
@@ -1089,6 +1091,8 @@ class HybridQueryEngine:
                 entity_type = "campaign"
 
         relationships: dict[str, Any] = {"entity_id": attack_id, "entity_type": entity_type}
+
+        # Note: logging happens at end of method after relationships are populated
 
         if entity_type == "technique":
             relationships["groups"] = self.graph.get_groups_using_technique(attack_id)
@@ -1190,6 +1194,7 @@ class HybridQueryEngine:
             relationships["techniques"] = self.graph.get_techniques_for_campaign(attack_id)
             relationships["attributed_to"] = self.graph.get_group_for_campaign(attack_id)
 
+        log_graph_connection(attack_id, entity_type, relationships)
         return relationships
 
     def get_knowledge_base_summary(self) -> dict[str, Any]:

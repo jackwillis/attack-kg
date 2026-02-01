@@ -76,6 +76,10 @@ class SemanticSearchEngine:
         Returns:
             List of SemanticResult objects
         """
+        from src.logging import log_semantic_search, log_semantic_result
+
+        search_id = log_semantic_search(query, top_k)
+
         # Generate query embedding
         embedding = self.embedder.embed_text(query)
 
@@ -116,6 +120,7 @@ class SemanticSearchEngine:
                     platforms=[p.strip() for p in platforms if p.strip()],
                 ))
 
+        log_semantic_result(search_id, [r.to_dict() for r in results])
         return results
 
     def find_techniques_for_finding(

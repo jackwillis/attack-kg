@@ -70,19 +70,36 @@ class OllamaBackend(LLMBackend):
         return self._client
 
     def generate(self, prompt: str, system: str | None = None) -> str:
+        from src.logging import log_llm_request, log_llm_response
+
+        request_id = log_llm_request(prompt, system=system, model=self.model)
+
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
         response = self.client.chat(model=self.model, messages=messages)
-        return response["message"]["content"]
+        result = response["message"]["content"]
+
+        log_llm_response(request_id, result)
+        return result
 
     def generate_json(self, prompt: str, system: str | None = None) -> dict[str, Any]:
+        from src.logging import log_llm_request, log_llm_response
+
         # Add JSON instruction to prompt
         json_prompt = f"{prompt}\n\nRespond with valid JSON only, no other text."
 
-        response_text = self.generate(json_prompt, system)
+        request_id = log_llm_request(json_prompt, system=system, model=self.model)
+
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": json_prompt})
+
+        response = self.client.chat(model=self.model, messages=messages)
+        response_text = response["message"]["content"]
 
         # Try to extract JSON from response
         try:
@@ -92,9 +109,12 @@ class OllamaBackend(LLMBackend):
             elif "```" in response_text:
                 response_text = response_text.split("```")[1].split("```")[0]
 
-            return json.loads(response_text.strip())
+            parsed = json.loads(response_text.strip())
+            log_llm_response(request_id, response_text, parsed=parsed)
+            return parsed
         except json.JSONDecodeError as e:
             console.print(f"[yellow]Failed to parse JSON response: {e}[/yellow]")
+            log_llm_response(request_id, response_text, error=str(e))
             return {"error": "Failed to parse JSON", "raw": response_text}
 
 
@@ -122,6 +142,10 @@ class OpenAIBackend(LLMBackend):
         return self._client
 
     def generate(self, prompt: str, system: str | None = None) -> str:
+        from src.logging import log_llm_request, log_llm_response
+
+        request_id = log_llm_request(prompt, system=system, model=self.model)
+
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -131,9 +155,16 @@ class OpenAIBackend(LLMBackend):
             model=self.model,
             messages=messages,
         )
-        return response.choices[0].message.content
+        result = response.choices[0].message.content
+
+        log_llm_response(request_id, result)
+        return result
 
     def generate_json(self, prompt: str, system: str | None = None) -> dict[str, Any]:
+        from src.logging import log_llm_request, log_llm_response
+
+        request_id = log_llm_request(prompt, system=system, model=self.model)
+
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -145,7 +176,11 @@ class OpenAIBackend(LLMBackend):
             response_format={"type": "json_object"},
         )
 
-        return json.loads(response.choices[0].message.content)
+        response_text = response.choices[0].message.content
+        parsed = json.loads(response_text)
+
+        log_llm_response(request_id, response_text, parsed=parsed)
+        return parsed
 
 
 class QueryPlanner:

@@ -99,6 +99,17 @@ See `model-comparison-reports/RESULTS.md` for full benchmark results.
 | `OLLAMA_HOST` | Ollama server URL (for Docker/remote) | `http://localhost:11434` |
 | `OPENAI_API_KEY` | OpenAI API key (for `--backend openai`) | - |
 | `ATTACK_KG_OFFLINE` | Prevent HuggingFace model downloads at runtime | `1` in Docker, `false` otherwise |
+| `ATTACK_KG_DEBUG` | Enable debug logging to `~/.attack_kg/logs/` | `false` |
+
+### Debug Logging
+
+Enable debug logging to see LLM prompts/responses, SPARQL queries, and graph connections:
+
+```bash
+ATTACK_KG_DEBUG=1 uv run attack-kg analyze "password spraying attack"
+```
+
+Logs are written as JSON Lines to `~/.attack_kg/logs/session_YYYYMMDD_HHMMSS.jsonl`.
 
 ## Architecture
 

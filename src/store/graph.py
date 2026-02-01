@@ -86,16 +86,21 @@ class AttackGraph:
         console.print(f"[green]Loaded {loaded} triples in {parse_time:.1f}s[/green]")
         return loaded
 
-    def query(self, sparql: str) -> list[dict[str, Any]]:
+    def query(self, sparql: str, context: str | None = None) -> list[dict[str, Any]]:
         """
         Execute a SPARQL SELECT query.
 
         Args:
             sparql: SPARQL query string
+            context: Optional context for logging (e.g., "get_technique")
 
         Returns:
             List of result rows as dictionaries
         """
+        from src.logging import log_sparql_query, log_sparql_result
+
+        query_id = log_sparql_query(sparql, context=context)
+
         results = self._store.query(sparql)
 
         # Handle SELECT queries
@@ -112,8 +117,11 @@ class AttackGraph:
                         # Extract value from Literal/NamedNode
                         row[var_name] = str(val.value) if hasattr(val, 'value') else str(val)
                 rows.append(row)
+
+            log_sparql_result(query_id, rows)
             return rows
 
+        log_sparql_result(query_id, [])
         return []
 
     def query_to_list(self, sparql: str) -> list[dict[str, Any]]:
@@ -1083,6 +1091,8 @@ class AttackGraph:
         Returns:
             List of D3FEND techniques with via_mitigation context
         """
+        from src.logging import log_d3fend_lookup
+
         # Get mitigations with inheritance for subtechniques
         mitigations = self.get_mitigations_with_inheritance(attack_id)
 
@@ -1115,6 +1125,7 @@ class AttackGraph:
                             })
                             break
 
+        log_d3fend_lookup(attack_id, mitigations, d3fend_results)
         return d3fend_results
 
     def get_all_d3fend_techniques(self, limit: int = 100) -> list[dict[str, str]]:
