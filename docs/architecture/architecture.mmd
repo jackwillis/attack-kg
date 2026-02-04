@@ -58,12 +58,8 @@ flowchart TB
             OLLAMA["OllamaBackend<br/><i>Local LLM</i>"]
             OPENAI["OpenAIBackend<br/><i>Cloud LLM</i>"]
         end
-        subgraph TwoStage["Two-Stage Pipeline"]
-            direction LR
-            SELECTOR["NodeSelector<br/><i>Stage 1</i><br/>Technique Selection"]
-            REMEDIATOR["RemediationWriter<br/><i>Stage 2</i><br/>Remediation Guidance"]
-        end
-        ANALYZER["AttackAnalyzer<br/><i>analyzer.py</i><br/>Orchestrates Pipeline"]
+        ANALYZER["AttackAnalyzer<br/><i>analyzer.py</i><br/>Single-stage (default)<br/>or Two-stage (--two-stage)"]
+        TOON["TOON Encoder<br/><i>toon_encoder.py</i><br/>Token-efficient context"]
     end
 
     subgraph Interface["User Interface"]
@@ -100,11 +96,10 @@ flowchart TB
     SPARQL --> HYB
 
     %% Reasoning connections
-    HYB --> ANALYZER
-    SELECTOR --> REMEDIATOR
-    OLLAMA --> TwoStage
-    OPENAI --> TwoStage
-    ANALYZER --> TwoStage
+    HYB --> TOON
+    TOON --> ANALYZER
+    OLLAMA --> ANALYZER
+    OPENAI --> ANALYZER
 
     %% Interface connections
     ANALYZER --> CLI
@@ -121,6 +116,6 @@ flowchart TB
 
     class MITRE,D3FEND,LOLBAS,GTFO external
     class OXI,CHROMA storage
-    class HYB core
+    class HYB,TOON core
     class OLLAMA,OPENAI,ANALYZER llm
     class CLI,REPL interface

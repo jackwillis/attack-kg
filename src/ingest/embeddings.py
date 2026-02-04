@@ -1,4 +1,10 @@
-"""Generate embeddings for ATT&CK techniques and store in ChromaDB."""
+"""Generate embeddings for ATT&CK techniques and store in ChromaDB.
+
+This module handles embedding generation for:
+- ATT&CK techniques (from RDF graph)
+- LOLBAS entries (Windows LOLBins with technique mappings)
+- GTFOBins entries (Linux binaries with function mappings)
+"""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,6 +14,9 @@ from rich.console import Console
 from rich.progress import Progress, BarColumn, TextColumn, TaskProgressColumn
 
 console = Console()
+
+# Default data directory for LOLBAS/GTFOBins
+DEFAULT_DATA_DIR = Path("data")
 
 
 @dataclass
@@ -278,6 +287,35 @@ class VectorStore:
 
         console.print(f"[green]Added {len(documents)} documents to vector store[/green]")
 
+    def add_external_documents(
+        self,
+        documents: list["ExternalDocument"],
+        embeddings: list[list[float]],
+    ) -> None:
+        """
+        Add external source documents (LOLBAS, GTFOBins) with their embeddings.
+
+        Args:
+            documents: List of ExternalDocument objects
+            embeddings: Corresponding embedding vectors
+        """
+        ids = [doc.id for doc in documents]
+        texts = [doc.to_text() for doc in documents]
+        metadatas = [doc.to_metadata() for doc in documents]
+
+        # ChromaDB has a batch size limit, process in chunks
+        batch_size = 500
+        for i in range(0, len(ids), batch_size):
+            end = min(i + batch_size, len(ids))
+            self.collection.add(
+                ids=ids[i:end],
+                documents=texts[i:end],
+                embeddings=embeddings[i:end],
+                metadatas=metadatas[i:end],
+            )
+
+        console.print(f"[green]Added {len(documents)} external documents to vector store[/green]")
+
     def search(
         self,
         query: str,
@@ -286,7 +324,7 @@ class VectorStore:
         where: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """
-        Search for similar techniques.
+        Search for similar techniques and external documents.
 
         Args:
             query: Query text (used if embedding not provided)
@@ -295,7 +333,8 @@ class VectorStore:
             where: Optional metadata filters
 
         Returns:
-            List of matching techniques with scores
+            List of matching documents with scores. External documents (LOLBAS, GTFOBins)
+            include 'source' and 'tool' fields for provenance tracking.
         """
         if embedding is not None:
             results = self.collection.query(
@@ -315,14 +354,36 @@ class VectorStore:
         # Format results
         output = []
         if results["ids"] and results["ids"][0]:
-            for i, attack_id in enumerate(results["ids"][0]):
-                output.append({
-                    "attack_id": attack_id,
-                    "name": results["metadatas"][0][i].get("name", ""),
-                    "tactics": results["metadatas"][0][i].get("tactics", ""),
-                    "distance": results["distances"][0][i] if results["distances"] else None,
-                    "similarity": 1 - results["distances"][0][i] if results["distances"] else None,
-                })
+            for i, doc_id in enumerate(results["ids"][0]):
+                metadata = results["metadatas"][0][i]
+                distance = results["distances"][0][i] if results["distances"] else None
+                similarity = 1 - distance if distance is not None else None
+
+                # Check if this is an external source (LOLBAS, GTFOBins)
+                source_type = metadata.get("type", "attack")
+
+                if source_type in ("lolbas", "gtfobins"):
+                    # External source result - includes tool name and maps to technique
+                    output.append({
+                        "attack_id": metadata.get("attack_id", ""),
+                        "name": metadata.get("tool", ""),  # Tool name for display
+                        "tactics": "",  # External sources don't have tactics directly
+                        "distance": distance,
+                        "similarity": similarity,
+                        "source": source_type,
+                        "tool": metadata.get("tool", ""),
+                        "platform": metadata.get("platform", ""),
+                    })
+                else:
+                    # Standard ATT&CK technique result
+                    output.append({
+                        "attack_id": doc_id,
+                        "name": metadata.get("name", ""),
+                        "tactics": metadata.get("tactics", ""),
+                        "distance": distance,
+                        "similarity": similarity,
+                        "source": "attack",
+                    })
 
         return output
 
@@ -331,32 +392,147 @@ class VectorStore:
         return self.collection.count()
 
 
+@dataclass
+class ExternalDocument:
+    """A document from external sources (LOLBAS, GTFOBins)."""
+
+    id: str
+    text: str
+    metadata: dict[str, Any]
+
+    def to_text(self) -> str:
+        return self.text
+
+    def to_metadata(self) -> dict[str, Any]:
+        return self.metadata
+
+
+def extract_lolbas_documents(data_dir: Path | str = DEFAULT_DATA_DIR) -> list[ExternalDocument]:
+    """
+    Extract LOLBAS entries as documents for embedding.
+
+    Args:
+        data_dir: Directory containing LOLBAS data (data/lolbas/)
+
+    Returns:
+        List of ExternalDocument objects
+    """
+    from src.ingest.lolbas import parse_lolbas, lolbas_to_documents
+
+    lolbas_dir = Path(data_dir) / "lolbas"
+    if not lolbas_dir.exists():
+        console.print("[dim]LOLBAS data not found, skipping[/dim]")
+        return []
+
+    entries = parse_lolbas(lolbas_dir)
+    docs = lolbas_to_documents(entries)
+
+    return [
+        ExternalDocument(
+            id=d["id"],
+            text=d["text"],
+            metadata=d["metadata"],
+        )
+        for d in docs
+    ]
+
+
+def extract_gtfobins_documents(data_dir: Path | str = DEFAULT_DATA_DIR) -> list[ExternalDocument]:
+    """
+    Extract GTFOBins entries as documents for embedding.
+
+    Args:
+        data_dir: Directory containing GTFOBins data (data/gtfobins/)
+
+    Returns:
+        List of ExternalDocument objects
+    """
+    from src.ingest.gtfobins import parse_gtfobins, gtfobins_to_documents
+
+    gtfobins_dir = Path(data_dir) / "gtfobins"
+    if not gtfobins_dir.exists():
+        console.print("[dim]GTFOBins data not found, skipping[/dim]")
+        return []
+
+    entries = parse_gtfobins(gtfobins_dir)
+    docs = gtfobins_to_documents(entries)
+
+    return [
+        ExternalDocument(
+            id=d["id"],
+            text=d["text"],
+            metadata=d["metadata"],
+        )
+        for d in docs
+    ]
+
+
 def build_vector_store(
     graph,
     persist_dir: Path | str | None = None,
     model_name: str = "nomic-ai/nomic-embed-text-v1.5",
+    data_dir: Path | str = DEFAULT_DATA_DIR,
+    include_lolbas: bool = True,
+    include_gtfobins: bool = True,
 ) -> VectorStore:
     """
-    Build vector store from RDF graph.
+    Build vector store from RDF graph and external sources.
 
     Args:
         graph: AttackGraph instance
         persist_dir: Directory for persistent storage
         model_name: Embedding model to use
+        data_dir: Directory containing LOLBAS/GTFOBins data
+        include_lolbas: Include LOLBAS Windows LOLBins
+        include_gtfobins: Include GTFOBins Linux binaries
 
     Returns:
         Populated VectorStore instance
     """
-    console.print("\n[bold]Step 1/3:[/bold] Extracting techniques from graph...")
+    console.print("\n[bold]Step 1/4:[/bold] Extracting techniques from graph...")
     documents = extract_techniques_from_graph(graph)
 
-    console.print("\n[bold]Step 2/3:[/bold] Generating embeddings...")
+    # Collect external documents
+    external_docs: list[ExternalDocument] = []
+
+    console.print("\n[bold]Step 2/4:[/bold] Extracting external sources...")
+    if include_lolbas:
+        lolbas_docs = extract_lolbas_documents(data_dir)
+        external_docs.extend(lolbas_docs)
+        console.print(f"  [green]LOLBAS:[/green] {len(lolbas_docs)} documents")
+
+    if include_gtfobins:
+        gtfobins_docs = extract_gtfobins_documents(data_dir)
+        external_docs.extend(gtfobins_docs)
+        console.print(f"  [green]GTFOBins:[/green] {len(gtfobins_docs)} documents")
+
+    console.print("\n[bold]Step 3/4:[/bold] Generating embeddings...")
     embedder = EmbeddingGenerator(model_name)
-    embeddings = embedder.embed_documents(documents)
 
-    console.print("\n[bold]Step 3/3:[/bold] Storing in ChromaDB...")
+    # Generate embeddings for ATT&CK techniques
+    technique_embeddings = embedder.embed_documents(documents)
+
+    # Generate embeddings for external documents
+    external_embeddings = []
+    if external_docs:
+        console.print(f"[blue]Generating embeddings for {len(external_docs)} external documents...[/blue]")
+        external_texts = [doc.to_text() for doc in external_docs]
+        external_embeddings = embedder.model.encode(external_texts, show_progress_bar=True, batch_size=32).tolist()
+
+    console.print("\n[bold]Step 4/4:[/bold] Storing in ChromaDB...")
     store = VectorStore(persist_dir, reset=True)
-    store.add_documents(documents, embeddings)
 
-    console.print(f"\n[green bold]Vector store complete![/green bold] {store.count()} techniques indexed.")
+    # Add ATT&CK techniques
+    store.add_documents(documents, technique_embeddings)
+
+    # Add external documents
+    if external_docs:
+        store.add_external_documents(external_docs, external_embeddings)
+
+    total_docs = len(documents) + len(external_docs)
+    console.print(f"\n[green bold]Vector store complete![/green bold] {total_docs} documents indexed.")
+    console.print(f"  [dim]ATT&CK techniques: {len(documents)}[/dim]")
+    if include_lolbas or include_gtfobins:
+        console.print(f"  [dim]External sources: {len(external_docs)}[/dim]")
+
     return store

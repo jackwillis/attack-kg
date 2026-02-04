@@ -7,6 +7,7 @@
 #   docker run attack-kg --help
 #   docker run attack-kg technique T1110.003
 #   docker run attack-kg search "credential theft"
+#   docker run attack-kg search "certutil download" --hybrid  # Uses LOLBAS mappings
 #   docker run attack-kg group APT29
 #
 # Remediation analysis (requires LLM backend):
@@ -22,6 +23,12 @@
 #
 # D3FEND countermeasures:
 #   docker run attack-kg countermeasures T1110.003
+#
+# External data sources included:
+#   - MITRE ATT&CK (STIX 2.1)
+#   - MITRE D3FEND (Defensive techniques)
+#   - LOLBAS (Windows LOLBins with technique mappings)
+#   - GTFOBins (Linux binaries with function mappings)
 
 # Stage 1: Build with all deps, swap torch for CPU version
 FROM python:3.12-slim AS builder

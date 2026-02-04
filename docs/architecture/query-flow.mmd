@@ -33,9 +33,9 @@ sequenceDiagram
             HybridEngine->>Graph: get_technique_full(attack_id)
             Graph->>Oxigraph: SPARQL query
             Oxigraph-->>Graph: technique details
-            HybridEngine->>Graph: get_groups_using_technique()
-            HybridEngine->>Graph: get_mitigations_with_inheritance()
+            HybridEngine->>Graph: get_software_using_technique()
             HybridEngine->>Graph: get_campaigns_using_technique()
+            HybridEngine->>Graph: get_mitigations_with_inheritance()
             HybridEngine->>Graph: get_detection_strategies_for_technique()
             HybridEngine->>Graph: get_data_sources_for_technique()
         end
@@ -44,32 +44,20 @@ sequenceDiagram
 
     HybridEngine-->>CLI: EnrichedTechnique[]
 
-    rect rgb(255, 243, 205)
-        Note over CLI,LLM: Stage 1: Node Selection (LLM)
-        CLI->>LLM: NodeSelector.select(finding, candidates)
-        Note right of LLM: Task: Which candidates apply?<br/>Output: IDs only (no hallucination)<br/>+ confidence scores<br/>+ evidence from finding text
-        LLM-->>CLI: selected_ids[] + evidence[]
-        CLI->>CLI: Validate IDs against candidates
-        CLI->>CLI: Rehydrate names from graph
-    end
-
     rect rgb(212, 237, 218)
-        Note over CLI,Oxigraph: Graph Enrichment
-        CLI->>Graph: get_mitigations_with_inheritance(technique_ids)
-        Graph->>Oxigraph: SPARQL (includes parent technique mitigations)
-        Oxigraph-->>Graph: mitigations[]
+        Note over CLI,Oxigraph: Graph Enrichment for D3FEND
         CLI->>Graph: get_d3fend_for_techniques(technique_ids)
         Graph->>Oxigraph: SPARQL (D3FEND via mitigation links)
         Oxigraph-->>Graph: d3fend_techniques[]
     end
 
-    rect rgb(248, 215, 218)
-        Note over CLI,LLM: Stage 2: Remediation Writing (LLM)
-        CLI->>LLM: RemediationWriter.write(finding, techniques, mitigations, d3fend)
-        Note right of LLM: Task: How to fix these issues?<br/>Constrained to provided mitigations<br/>Context-aware implementation<br/>No invented product names
-        LLM-->>CLI: prioritized_mitigations[] + implementation_steps[]
-        CLI->>CLI: Validate mitigation IDs
-        CLI->>CLI: Rehydrate names from graph
+    rect rgb(255, 243, 205)
+        Note over CLI,LLM: Single-Stage LLM Analysis (default)
+        CLI->>CLI: Build TOON context:<br/>techniques, software, campaigns,<br/>mitigations, D3FEND, detection strategies
+        CLI->>LLM: analyze(finding, TOON_context)
+        Note right of LLM: Task: Classify + write remediation<br/>Constrained to provided candidates<br/>Output: techniques, mitigations, D3FEND
+        LLM-->>CLI: AnalysisResult JSON
+        CLI->>CLI: Validate all IDs against retrieval set
     end
 
     CLI-->>User: Techniques (validated),<br/>Mitigations (prioritized),<br/>D3FEND Countermeasures,<br/>Kill Chain Analysis

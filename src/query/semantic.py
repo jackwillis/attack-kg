@@ -1,6 +1,6 @@
-"""Semantic search interface for ATT&CK techniques."""
+"""Semantic search interface for ATT&CK techniques and external sources."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -18,15 +18,21 @@ class SemanticResult:
     similarity: float
     tactics: list[str]
     platforms: list[str]
+    source: str = "attack"  # "attack", "lolbas", or "gtfobins"
+    tool: str | None = None  # Tool name for external sources
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "attack_id": self.attack_id,
             "name": self.name,
             "similarity": self.similarity,
             "tactics": self.tactics,
             "platforms": self.platforms,
+            "source": self.source,
         }
+        if self.tool:
+            result["tool"] = self.tool
+        return result
 
 
 class SemanticSearchEngine:
@@ -105,20 +111,47 @@ class SemanticSearchEngine:
             where=where,
         )
 
-        # Convert to SemanticResult objects
+        # Convert to SemanticResult objects, deduplicating by attack_id
         results = []
+        seen_ids: set[str] = set()
+
         for r in raw_results:
             similarity = r.get("similarity", 0)
-            if similarity >= min_similarity:
-                tactics = r.get("tactics", "").split(",") if r.get("tactics") else []
-                platforms = r.get("platforms", "").split(",") if r.get("platforms") else []
-                results.append(SemanticResult(
-                    attack_id=r["attack_id"],
-                    name=r["name"],
-                    similarity=similarity,
-                    tactics=[t.strip() for t in tactics if t.strip()],
-                    platforms=[p.strip() for p in platforms if p.strip()],
-                ))
+            if similarity < min_similarity:
+                continue
+
+            attack_id = r["attack_id"]
+            source = r.get("source", "attack")
+
+            # For external sources, deduplicate by attack_id
+            # (multiple tools may map to the same technique)
+            if source in ("lolbas", "gtfobins"):
+                if attack_id in seen_ids:
+                    continue
+                seen_ids.add(attack_id)
+
+            tactics = r.get("tactics", "").split(",") if r.get("tactics") else []
+
+            # Handle platforms - external sources have single platform in metadata
+            platforms_raw = r.get("platforms", "")
+            if isinstance(platforms_raw, str):
+                platforms = [p.strip() for p in platforms_raw.split(",") if p.strip()]
+            else:
+                platforms = []
+
+            # For external sources, set platform from metadata if available
+            if source in ("lolbas", "gtfobins") and r.get("platform"):
+                platforms = [r["platform"]]
+
+            results.append(SemanticResult(
+                attack_id=attack_id,
+                name=r["name"],
+                similarity=similarity,
+                tactics=[t.strip() for t in tactics if t.strip()],
+                platforms=platforms,
+                source=source,
+                tool=r.get("tool"),
+            ))
 
         log_semantic_result(search_id, [r.to_dict() for r in results])
         return results

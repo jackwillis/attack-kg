@@ -35,28 +35,55 @@ Use ONLY these indicators to scope your recommendations. Do NOT assume enterpris
 (Azure AD, Okta, CrowdStrike) unless the finding explicitly mentions them.
 
 ═══════════════════════════════════════════════════════════════════════════════
-IMPLEMENTATION GUIDANCE RULES (CRITICAL)
+ANTI-HALLUCINATION RULES (CRITICAL - READ CAREFULLY)
+═══════════════════════════════════════════════════════════════════════════════
+
+NEVER INVENT:
+- Configuration file paths you're not 100% certain exist
+- Command-line flags, options, or parameters you're uncertain about
+- API endpoints, methods, or payloads
+- Specific version numbers unless stated in the finding
+- Product names, tools, or services not mentioned in the finding
+- Registry keys, file locations, or system paths you're guessing
+
+ALWAYS:
+- Add "confidence": "high"/"medium"/"low" to each remediation item
+- Use "low" confidence when providing general guidance without specific syntax
+- Use "medium" confidence when you know the approach but not exact steps
+- Use "high" confidence ONLY for well-documented, standard configurations
+
+WHEN UNCERTAIN (this is PREFERRED over guessing):
+- Say "Consult [product] documentation for exact configuration steps"
+- Say "Enable [feature] through the [product] admin interface" (without inventing paths)
+- Say "Configure rate limiting according to your [product] version's documentation"
+- Provide the GOAL, not invented implementation details
+
+EXAMPLE OF GOOD GUIDANCE:
+"Enable MFA in ownCloud by configuring a TOTP app in the admin settings. Consult ownCloud documentation for your version's specific configuration steps."
+
+EXAMPLE OF BAD GUIDANCE (DO NOT DO THIS):
+"Edit /etc/owncloud/config.php and add: $CONFIG['mfa_enabled'] = true; $CONFIG['totp_secret_length'] = 32;"
+^ This invents file paths and config syntax that may not exist!
+
+═══════════════════════════════════════════════════════════════════════════════
+IMPLEMENTATION GUIDANCE RULES
 ═══════════════════════════════════════════════════════════════════════════════
 
 When writing implementation steps:
 
 DO:
 - Reference the specific product's native features
-- Describe the general location of settings
+- Describe the general location of settings (e.g., "in the security settings panel")
 - Provide conceptual steps that an admin can follow
 - Use phrases like "Configure [product] to..." or "Enable [feature] in [product]"
+- Include "Consult vendor documentation" for complex configurations
 
 DO NOT:
 - Invent specific configuration file syntax unless 100% certain
 - Fabricate command-line flags or API parameters
 - Assume configuration file formats you're not certain about
 - Mix guidance for different products
-
-WHEN UNCERTAIN about exact syntax:
-- State the goal clearly
-- Reference official docs
-- Describe the admin UI path if known
-- Avoid inventing specific code/config that could be wrong
+- Provide code snippets unless they are standard and well-known
 
 ═══════════════════════════════════════════════════════════════════════════════
 PRIORITIZATION
@@ -76,18 +103,36 @@ For D3FEND Techniques:
 OUTPUT FORMAT
 ═══════════════════════════════════════════════════════════════════════════════
 
-Output JSON with IDs and implementation only (names will be looked up):
+Output JSON with IDs, implementation, and CONFIDENCE level (names will be looked up):
 {
     "remediations": [
-        {"id": "M1032", "priority": "HIGH", "addresses": ["T1110.003"], "implementation": "1. Enable 2FA. 2. Require for admin accounts."}
+        {
+            "id": "M1032",
+            "priority": "HIGH",
+            "confidence": "high",
+            "addresses": ["T1110.003"],
+            "implementation": "Enable MFA in ownCloud admin settings. Consult ownCloud documentation for TOTP provider configuration."
+        }
     ],
     "defend": [
-        {"id": "D3-MFA", "priority": "HIGH", "addresses": ["T1110.003"], "implementation": "Deploy TOTP-based MFA.", "via": ["M1032"]}
+        {
+            "id": "D3-MFA",
+            "priority": "HIGH",
+            "confidence": "medium",
+            "addresses": ["T1110.003"],
+            "implementation": "Deploy TOTP-based MFA. Configure according to your authentication provider's documentation.",
+            "via": ["M1032"]
+        }
     ],
     "detection": [
         {"source": "Authentication Logs", "rationale": "Detects repeated failed logins", "covers": ["T1110.003"]}
     ]
 }
+
+CONFIDENCE LEVELS:
+- "high": Well-documented, standard approach (e.g., "enable MFA" is always valid)
+- "medium": Correct approach but specifics vary by product/version
+- "low": General guidance only, implementation details are uncertain
 
 CONSISTENCY RULE: "addresses" and "covers" must ONLY contain technique IDs from Stage 1.
 
@@ -103,6 +148,7 @@ class RemediationItem:
     priority: str
     addresses: list[str]
     implementation: str
+    confidence: str = "medium"  # "high", "medium", "low"
 
 
 @dataclass
@@ -115,6 +161,7 @@ class D3FendRecommendation:
     addresses: list[str]
     implementation: str
     via_mitigations: list[str]
+    confidence: str = "medium"  # "high", "medium", "low"
 
 
 @dataclass
@@ -250,6 +297,7 @@ Prioritize mitigations by impact and include D3FEND recommendations where applic
                 priority=rem.get("priority", "MEDIUM"),
                 addresses=addresses,
                 implementation=rem.get("implementation", ""),
+                confidence=rem.get("confidence", "medium"),
             ))
 
         # Process D3FEND recommendations (support both new "id"/"via" and legacy formats)
@@ -277,6 +325,7 @@ Prioritize mitigations by impact and include D3FEND recommendations where applic
                 addresses=addresses,
                 implementation=d3f.get("implementation", ""),
                 via_mitigations=via_mits,
+                confidence=d3f.get("confidence", "medium"),
             ))
 
         # Process detection recommendations (support both new and legacy formats)

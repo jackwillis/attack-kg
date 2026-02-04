@@ -26,8 +26,10 @@ def download(
     output_dir: Path = typer.Option(DEFAULT_DATA_DIR, help="Output directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Re-download even if exists"),
     skip_d3fend: bool = typer.Option(False, "--skip-d3fend", help="Skip downloading D3FEND ontology"),
+    skip_lolbas: bool = typer.Option(False, "--skip-lolbas", help="Skip downloading LOLBAS data"),
+    skip_gtfobins: bool = typer.Option(False, "--skip-gtfobins", help="Skip downloading GTFOBins data"),
 ):
-    """Download MITRE ATT&CK STIX data and D3FEND ontology."""
+    """Download MITRE ATT&CK STIX data, D3FEND ontology, and external tool mappings."""
     from src.ingest.download import download_attack_data, load_stix_bundle, print_stix_summary
 
     data_file = download_attack_data(output_dir, domain, force)
@@ -37,6 +39,14 @@ def download(
     if not skip_d3fend:
         from src.ingest.d3fend import download_d3fend
         download_d3fend(output_dir, force=force)
+
+    if not skip_lolbas:
+        from src.ingest.lolbas import download_lolbas
+        download_lolbas(output_dir, force=force)
+
+    if not skip_gtfobins:
+        from src.ingest.gtfobins import download_gtfobins
+        download_gtfobins(output_dir, force=force)
 
 
 @app.command()
@@ -69,9 +79,11 @@ def build(
     vector_dir: Path = typer.Option(DEFAULT_VECTOR_DIR, help="ChromaDB store directory"),
     skip_vectors: bool = typer.Option(False, help="Skip building vector store"),
     skip_d3fend: bool = typer.Option(False, help="Skip loading D3FEND ontology"),
+    skip_lolbas: bool = typer.Option(False, help="Skip LOLBAS in vector store"),
+    skip_gtfobins: bool = typer.Option(False, help="Skip GTFOBins in vector store"),
     force_reload: bool = typer.Option(False, "--force", "-f", help="Force reload even if store has data"),
 ):
-    """Build the knowledge graph and vector store from RDF."""
+    """Build the knowledge graph and vector store from RDF and external sources."""
     import time
     from src.store.graph import AttackGraph
     from src.ingest.embeddings import build_vector_store
@@ -131,7 +143,13 @@ def build(
 
     if not skip_vectors:
         console.print("\n[bold]Building vector store (this may take 1-2 minutes)...[/bold]")
-        build_vector_store(graph, vector_dir)
+        build_vector_store(
+            graph,
+            vector_dir,
+            data_dir=DEFAULT_DATA_DIR,
+            include_lolbas=not skip_lolbas,
+            include_gtfobins=not skip_gtfobins,
+        )
     else:
         console.print("\n[dim]Skipping vector store (use without --skip-vectors to build)[/dim]")
 
@@ -389,7 +407,7 @@ def analyze(
     graph_dir: Path = typer.Option(DEFAULT_GRAPH_DIR, help="Oxigraph store directory"),
     vector_dir: Path = typer.Option(DEFAULT_VECTOR_DIR, help="ChromaDB store directory"),
     output_json: bool = typer.Option(False, "--json", help="Output as JSON"),
-    two_stage: bool = typer.Option(True, "--two-stage/--single-stage", help="Use two-stage LLM (separate selection and remediation)"),
+    two_stage: bool = typer.Option(False, "--two-stage/--single-stage", help="Use two-stage LLM (separate selection and remediation)"),
     toon: bool = typer.Option(True, "--toon/--no-toon", help="Use TOON format for reduced token usage"),
     hybrid: bool = typer.Option(True, "--hybrid/--no-hybrid", help="Use hybrid BM25+semantic retrieval"),
     kill_chain: bool = typer.Option(True, "--kill-chain/--no-kill-chain", help="Include kill chain adjacent techniques"),
@@ -503,7 +521,7 @@ def benchmark(
     graph_dir: Path = typer.Option(DEFAULT_GRAPH_DIR, help="Oxigraph store directory"),
     vector_dir: Path = typer.Option(DEFAULT_VECTOR_DIR, help="ChromaDB store directory"),
     markdown: bool = typer.Option(False, "--markdown", "-md", help="Generate markdown report"),
-    two_stage: bool = typer.Option(True, "--two-stage/--single-stage", help="Use two-stage LLM architecture"),
+    two_stage: bool = typer.Option(False, "--two-stage/--single-stage", help="Use two-stage LLM architecture"),
     toon: bool = typer.Option(True, "--toon/--no-toon", help="Use TOON format for reduced token usage"),
     hybrid: bool = typer.Option(True, "--hybrid/--no-hybrid", help="Use hybrid BM25+semantic retrieval"),
     kill_chain: bool = typer.Option(True, "--kill-chain/--no-kill-chain", help="Include kill chain analysis"),
@@ -542,7 +560,6 @@ def benchmark(
     # Initialize components
     console.print("\n[dim]Loading knowledge graph...[/dim]")
     graph = AttackGraph(graph_dir)
-    graph.load()
 
     from src.query.semantic import SemanticSearchEngine
     semantic = SemanticSearchEngine(vector_dir)
@@ -584,7 +601,7 @@ def repl(
     vector_dir: Path = typer.Option(DEFAULT_VECTOR_DIR, help="ChromaDB store directory"),
     backend: str = typer.Option("ollama", "--backend", "-b", help="LLM backend: ollama or openai"),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name override"),
-    two_stage: bool = typer.Option(True, "--two-stage/--single-stage", help="Use two-stage LLM for analyze"),
+    two_stage: bool = typer.Option(False, "--two-stage/--single-stage", help="Use two-stage LLM for analyze"),
     toon: bool = typer.Option(True, "--toon/--no-toon", help="Use TOON format for reduced token usage"),
     hybrid: bool = typer.Option(True, "--hybrid/--no-hybrid", help="Use hybrid BM25+semantic retrieval"),
     kill_chain: bool = typer.Option(True, "--kill-chain/--no-kill-chain", help="Include kill chain analysis"),

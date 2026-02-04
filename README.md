@@ -1,6 +1,6 @@
 # ATT&CK Knowledge Graph
 
-A neuro-symbolic system combining MITRE ATT&CK and D3FEND as an RDF knowledge graph with vector embeddings for intelligent threat intelligence querying and defensive recommendations.
+A neuro-symbolic system combining MITRE ATT&CK, D3FEND, LOLBAS, and GTFOBins as an RDF knowledge graph with vector embeddings for intelligent threat intelligence querying and defensive recommendations.
 
 ## Quick Start
 
@@ -8,8 +8,8 @@ A neuro-symbolic system combining MITRE ATT&CK and D3FEND as an RDF knowledge gr
 # Install dependencies
 uv sync
 
-# Download ATT&CK and D3FEND data, build stores
-uv run attack-kg download           # Download STIX + D3FEND ontology
+# Download all data sources and build stores
+uv run attack-kg download           # Download STIX + D3FEND + LOLBAS + GTFOBins
 uv run attack-kg ingest             # Convert ATT&CK to RDF (N-Triples)
 uv run attack-kg build              # Load into Oxigraph + build vector store
 ```
@@ -80,6 +80,26 @@ uv run attack-kg countermeasures T1110.003
 ```
 
 The `analyze` command automatically includes D3FEND recommendations alongside ATT&CK mitigations when D3FEND is loaded.
+
+## LOLBAS and GTFOBins Integration
+
+The system integrates [LOLBAS](https://lolbas-project.github.io/) (Living Off The Land Binaries and Scripts) and [GTFOBins](https://gtfobins.github.io/) to improve tool-to-technique retrieval. These sources provide explicit mappings from common binaries to ATT&CK techniques.
+
+**Why this matters**: ATT&CK technique descriptions don't always mention specific tools. For example, T1105 (Ingress Tool Transfer) doesn't explicitly list "certutil" in its description. With LOLBAS integration, searching for "certutil download" correctly maps to T1105.
+
+```bash
+# Search with tool names - LOLBAS/GTFOBins mappings improve results
+uv run attack-kg search "certutil download" --hybrid    # → T1105
+uv run attack-kg search "curl file download" --hybrid   # → T1105
+
+# Analyze findings mentioning tools
+uv run attack-kg analyze "attacker used certutil to download payload"
+```
+
+| Source | Coverage | Mappings |
+|--------|----------|----------|
+| LOLBAS | Windows binaries | certutil, mshta, regsvr32, etc. |
+| GTFOBins | Linux binaries | curl, wget, bash, python, etc. |
 
 ## LLM Model Selection
 
@@ -394,6 +414,8 @@ This project integrates data from the following sources:
 |--------|---------|-------|
 | [MITRE ATT&CK](https://attack.mitre.org/) | [Apache 2.0](https://github.com/mitre/cti/blob/master/LICENSE) | Techniques, tactics, groups, software, mitigations |
 | [MITRE D3FEND](https://d3fend.mitre.org/) | [Apache 2.0](https://github.com/d3fend/d3fend-ontology/blob/master/LICENSE) | Defensive techniques ontology |
+| [LOLBAS](https://github.com/LOLBAS-Project/LOLBAS) | [MIT](https://github.com/LOLBAS-Project/LOLBAS/blob/master/LICENSE) | Windows LOLBin → ATT&CK mappings |
+| [GTFOBins](https://github.com/GTFOBins/GTFOBins.github.io) | [GPL-3.0](https://github.com/GTFOBins/GTFOBins.github.io/blob/master/LICENSE) | Linux binary → ATT&CK mappings |
 
 ### Python Dependencies
 

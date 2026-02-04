@@ -47,6 +47,7 @@ class RemediationItem:
     addresses: list[str]  # technique IDs
     implementation: str
     d3fend_techniques: list[DefendTechnique] = field(default_factory=list)
+    confidence: str = "medium"  # "high", "medium", "low" - LLM's confidence in implementation specifics
 
 
 @dataclass
@@ -59,6 +60,7 @@ class DefendRecommendation:
     addresses: list[str]  # technique IDs
     implementation: str
     via_mitigations: list[str] = field(default_factory=list)
+    confidence: str = "medium"  # "high", "medium", "low" - LLM's confidence in implementation specifics
 
 
 @dataclass
@@ -113,6 +115,7 @@ class AnalysisResult:
                     "mitigation_id": r.mitigation_id,
                     "name": r.name,
                     "priority": r.priority,
+                    "confidence": r.confidence,
                     "addresses": r.addresses,
                     "implementation": r.implementation,
                     "d3fend_techniques": [
@@ -127,6 +130,7 @@ class AnalysisResult:
                     "d3fend_id": d.d3fend_id,
                     "name": d.name,
                     "priority": d.priority,
+                    "confidence": d.confidence,
                     "addresses": d.addresses,
                     "implementation": d.implementation,
                     "via_mitigations": d.via_mitigations,
@@ -209,6 +213,30 @@ WHEN UNCERTAIN about exact syntax or configuration:
 - Avoid inventing specific code/config that could be wrong
 
 ═══════════════════════════════════════════════════════════════════════════════
+ANTI-HALLUCINATION RULES (CRITICAL)
+═══════════════════════════════════════════════════════════════════════════════
+
+NEVER INVENT:
+- Configuration file paths you're not 100% certain exist
+- Command-line flags, options, or parameters you're uncertain about
+- API endpoints, methods, or payloads
+- Specific version numbers unless stated in the finding
+- Product names or services not mentioned in the finding
+
+ALWAYS:
+- Add "confidence": "high"/"medium"/"low" to each remediation item
+- Use "low" confidence when providing general guidance without specific syntax
+- Use "medium" confidence when you know the approach but not exact steps
+- Use "high" confidence ONLY for well-documented, standard configurations
+
+EXAMPLE OF GOOD GUIDANCE:
+"Enable MFA in ownCloud via the admin settings. Consult ownCloud documentation for TOTP configuration."
+
+EXAMPLE OF BAD GUIDANCE (DO NOT DO THIS):
+"Edit /etc/owncloud/config.php and add: $CONFIG['mfa_enabled'] = true;"
+^ This invents file paths and config syntax that may not exist!
+
+═══════════════════════════════════════════════════════════════════════════════
 PRIORITIZATION
 ═══════════════════════════════════════════════════════════════════════════════
 
@@ -244,8 +272,9 @@ Output JSON with this exact structure:
             "mitigation_id": "M1032",
             "name": "Multi-factor Authentication",
             "priority": "HIGH",
+            "confidence": "high",
             "addresses": ["T1110.003"],
-            "implementation": "1. Enable [product]'s built-in 2FA feature. 2. Require 2FA for admin accounts. 3. Configure via Admin > Security settings."
+            "implementation": "1. Enable [product]'s built-in 2FA feature. 2. Require 2FA for admin accounts. 3. Consult [product] documentation for exact configuration."
         }
     ],
     "defend_recommendations": [
@@ -253,8 +282,9 @@ Output JSON with this exact structure:
             "d3fend_id": "D3-MFA",
             "name": "Multi-factor Authentication",
             "priority": "HIGH",
+            "confidence": "medium",
             "addresses": ["T1110.003"],
-            "implementation": "Deploy TOTP-based MFA using [product]'s native 2FA module or compatible authenticator apps.",
+            "implementation": "Deploy TOTP-based MFA. Consult your authentication provider's documentation for configuration.",
             "via_mitigations": ["M1032"]
         }
     ],
@@ -298,7 +328,7 @@ class AttackAnalyzer:
         self,
         hybrid_engine,
         llm_backend=None,
-        two_stage: bool = True,
+        two_stage: bool = False,
         use_toon: bool = True,
         use_bm25: bool = True,
         use_kill_chain: bool = True,
@@ -310,9 +340,9 @@ class AttackAnalyzer:
             hybrid_engine: HybridQueryEngine instance
             llm_backend: LLM backend to use (defaults to Ollama)
             two_stage: Use two-stage LLM architecture (default False)
-            use_toon: Use TOON format for context (default False)
+            use_toon: Use TOON format for context (default True)
             use_bm25: Use BM25 hybrid retrieval (default True)
-            use_kill_chain: Include kill chain adjacent techniques (default False)
+            use_kill_chain: Include kill chain adjacent techniques (default True)
         """
         self.hybrid = hybrid_engine
         if llm_backend is None:
@@ -552,6 +582,7 @@ Analyze this finding and provide:
                 addresses=rem.addresses,
                 implementation=rem.implementation,
                 d3fend_techniques=[],  # Will be populated below
+                confidence=rem.confidence,
             ))
 
         # Merge D3FEND into mitigations
@@ -577,6 +608,7 @@ Analyze this finding and provide:
                     addresses=d3f.addresses,
                     implementation=d3f.implementation,
                     via_mitigations=d3f.via_mitigations,
+                    confidence=d3f.confidence,
                 ))
 
         detection_recs = [
@@ -982,6 +1014,7 @@ Analyze this finding and provide:
                     addresses=r.get("addresses", []),
                     implementation=r.get("implementation", ""),
                     d3fend_techniques=nested_d3fend,
+                    confidence=r.get("confidence", "medium"),
                 )
             )
 
@@ -994,6 +1027,7 @@ Analyze this finding and provide:
                 addresses=d.get("addresses", []),
                 implementation=d.get("implementation", ""),
                 via_mitigations=d.get("via_mitigations", []),
+                confidence=d.get("confidence", "medium"),
             )
             for d in standalone_d3fend
         ]
@@ -1059,10 +1093,15 @@ def print_analysis_result(result: AnalysisResult) -> None:
             priority_color = {"HIGH": "red", "MEDIUM": "yellow", "LOW": "green"}.get(
                 rem.priority.upper(), "white"
             )
+            conf_color = {"high": "green", "medium": "yellow", "low": "red"}.get(
+                rem.confidence.lower() if rem.confidence else "medium", "white"
+            )
+            conf_label = rem.confidence.capitalize() if rem.confidence else "Medium"
 
             console.print(
                 f"[bold]{i}. {rem.name}[/bold] ({rem.mitigation_id}) - "
-                f"[{priority_color}]{rem.priority} PRIORITY[/{priority_color}]"
+                f"[{priority_color}]{rem.priority} PRIORITY[/{priority_color}] "
+                f"[dim]([{conf_color}]{conf_label} confidence[/{conf_color}])[/dim]"
             )
             console.print(f"   [dim]Addresses:[/dim] {', '.join(rem.addresses)}")
             console.print(f"   [dim]Implementation:[/dim]")
