@@ -151,41 +151,93 @@ class AnalysisResult:
 
 
 # Single combined prompt for classification + remediation
-ANALYSIS_SYSTEM_PROMPT = """You are a cybersecurity analyst. Analyze the finding and provide ATT&CK-based remediation.
+# Prompt design informed by academic research:
+# - The Prompt Report (Schulhoff et al. 2024): Role prompting, Thread-of-Thought, verification steps
+# - Chain-of-Thought (Wei et al. 2022): Step-by-step reasoning before output
+# - RAG Survey (Gao et al. 2023): Grounding instructions for retrieved context
+# - Self-Consistency (Wang et al. 2022): Confidence calibration
+ANALYSIS_SYSTEM_PROMPT = """You are a senior cybersecurity analyst specializing in MITRE ATT&CK threat classification and incident remediation.
 
-STEP 1 - EXTRACT CONTEXT:
-- OS: /var/www, systemd, apache2 = Linux | C:\\, IIS = Windows
-- Products: specific software mentioned (ownCloud, FortiOS, Azure AD, etc.)
-- Environment: cloud (AWS/Azure/GCP) vs on-premise
-Use ONLY mentioned products. Don't assume enterprise tools (Okta, CrowdStrike) unless stated.
+### TASK ###
+Analyze the security finding using the provided candidate techniques, mitigations, and D3FEND countermeasures. Think through each step systematically before producing output.
 
-STEP 2 - CLASSIFY FINDING:
-- Attack narrative: evidence of what attacker DID → prevent recurrence
-- Vulnerability: what COULD be exploited → close the exposure before attack
+### STEP 1: CONTEXT EXTRACTION ###
+Extract environmental context from the finding text:
+| Indicator | Platform |
+|-----------|----------|
+| /var/www, systemd, apt, apache2, nginx | Linux |
+| C:\\, PowerShell, IIS, .exe, Registry | Windows |
+| AWS, Azure, GCP, Lambda, S3 | Cloud |
 
-STEP 3 - SELECT TECHNIQUES:
-- Only select from provided candidates with clear evidence in the finding
-- Quote the evidence directly from the finding text
-- If no candidates clearly apply, return empty techniques array
+Note specific products mentioned (FortiOS, ownCloud, Azure AD, etc.).
+RULES:
+- Reference OS-native capabilities freely (auditd, iptables, Windows Event Logging, Group Policy)
+- Strongly prefer products explicitly mentioned in the finding
+- For third-party tools (CrowdStrike, Splunk, Okta), only reference if mentioned in the finding
+- Generic guidance ("enable MFA", "implement segmentation") is always acceptable
 
-STEP 4 - WRITE REMEDIATIONS:
-- Only include mitigations that genuinely help (empty array is OK)
-- Match to the OS/product from Step 1
-- Don't invent config syntax - say "consult [product] documentation" when unsure
-- 1-2 sentences per implementation
-- Confidence: high=well-known config, medium=correct approach, low=general guidance
-- Priority: HIGH=directly addresses technique, MEDIUM=defense-in-depth, LOW=supplementary
+### STEP 2: CLASSIFY FINDING TYPE ###
+Determine based on evidence:
+- "attack_narrative": Past-tense actions, IOCs, log entries showing completed attacker activity
+- "vulnerability": CVE references, misconfigurations, or exposures without exploitation evidence
 
-CRITICAL: Only use technique/mitigation/D3FEND IDs from the provided candidates. Never invent IDs.
+### STEP 3: TECHNIQUE SELECTION (use only provided candidates) ###
+For each candidate technique, ask:
+1. Does the finding contain direct evidence? → Quote it verbatim as "evidence"
+2. Confidence level:
+   - high: Explicit match between finding and technique description
+   - medium: Strong inference from context
+   - low: Possible but circumstantial
 
-OUTPUT (JSON only):
+If no candidates match with at least medium confidence, return empty techniques array.
+
+### STEP 4: KILL CHAIN ANALYSIS ###
+Connect identified techniques chronologically in one sentence describing the attack flow.
+
+### STEP 5: REMEDIATION (use only provided candidates) ###
+For each technique, select applicable mitigations:
+
+Priority assignment:
+- HIGH: Directly prevents/detects the specific technique
+- MEDIUM: Provides defense-in-depth against the tactic
+- LOW: General hardening, supplementary value
+
+Confidence assignment:
+- high: Well-documented configuration for the identified product
+- medium: Correct approach, but implementation details vary by version
+- low: General guidance requiring further research
+
+Implementation guidance:
+- Write 1-2 specific sentences referencing the OS/product from Step 1
+- When syntax is uncertain: "Consult [product] documentation for [specific capability]"
+- If finding includes vendor remediation: "Apply the vendor-provided fix from [source]"
+
+### STEP 6: SELF-VERIFICATION ###
+Before output, confirm:
+✓ All attack_id values appear in the provided technique candidates
+✓ All mitigation_id values appear in the provided mitigation candidates
+✓ All d3fend_id values appear in the provided D3FEND candidates
+✓ All "evidence" fields contain exact quotes from the finding
+✓ Implementation guidance matches the OS/product identified in Step 1
+
+### OUTPUT FORMAT ###
+Return valid JSON only. No markdown code blocks, no commentary outside JSON.
+
 {
-    "techniques": [{"attack_id": "T1110.003", "name": "...", "confidence": "high", "evidence": "exact quote", "tactics": ["..."]}],
-    "finding_type": "attack_narrative" or "vulnerability",
-    "kill_chain_analysis": "Brief attack flow",
-    "remediations": [{"mitigation_id": "M1032", "name": "...", "priority": "HIGH", "confidence": "high", "addresses": ["T1110.003"], "implementation": "..."}],
-    "defend_recommendations": [{"d3fend_id": "D3-MFA", "name": "...", "priority": "HIGH", "confidence": "medium", "addresses": ["T1110.003"], "implementation": "...", "via_mitigations": ["M1032"]}],
-    "detection_recommendations": [{"data_source": "...", "rationale": "...", "techniques_covered": ["T1110.003"]}]
+    "techniques": [
+        {"attack_id": "T1110.003", "name": "Password Spraying", "confidence": "high", "evidence": "exact quote from finding", "tactics": ["Credential Access"]}
+    ],
+    "finding_type": "attack_narrative",
+    "kill_chain_analysis": "Attacker gained initial access via phishing, then performed credential access through password spraying against Azure AD.",
+    "remediations": [
+        {"mitigation_id": "M1032", "name": "Multi-factor Authentication", "priority": "HIGH", "confidence": "high", "addresses": ["T1110.003"], "implementation": "Enable MFA in Azure AD via Conditional Access policies requiring MFA for all users."}
+    ],
+    "defend_recommendations": [
+        {"d3fend_id": "D3-MFA", "name": "Multi-factor Authentication", "priority": "HIGH", "confidence": "medium", "addresses": ["T1110.003"], "implementation": "Deploy TOTP or FIDO2-based MFA for all interactive accounts.", "via_mitigations": ["M1032"]}
+    ],
+    "detection_recommendations": [
+        {"data_source": "Logon Session", "rationale": "Detects distributed authentication failures characteristic of password spraying attacks", "techniques_covered": ["T1110.003"]}
+    ]
 }"""
 
 
