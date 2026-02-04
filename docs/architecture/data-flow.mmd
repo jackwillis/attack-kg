@@ -32,8 +32,6 @@ sequenceDiagram
             Graph-->>Hybrid: technique details + tactics
             Hybrid->>Graph: get_software_using(id)
             Graph-->>Hybrid: [Cobalt Strike, Mimikatz, ...]
-            Hybrid->>Graph: get_campaigns_using(id)
-            Graph-->>Hybrid: [Operation Ghost, ...]
             Hybrid->>Graph: get_mitigations(id)
             Graph-->>Hybrid: [M1032, M1027, ...]
             Hybrid->>Graph: get_detection_strategies(id)

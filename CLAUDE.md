@@ -318,7 +318,6 @@ The graph retrieves rich relationships for each technique. Most are passed to th
 **Passed to LLM (in TOON format):**
 - Techniques: attack_id, name, tactics, similarity, platforms, description
 - Software: software_id, name, type, implements_techniques (top 10 by relevance)
-- Campaigns: campaign_id, name, uses_techniques (top 5 by relevance)
 - Mitigations: mitigation_id, name, addresses, inherited
 - D3FEND: d3fend_id, name, via_mitigation, addresses, definition
 - Detection Strategies: strategy, detects_techniques (top 10 by coverage)
@@ -326,7 +325,10 @@ The graph retrieves rich relationships for each technique. Most are passed to th
 - Kill Chain: detected_tactics, adjacent_tactics, adjacent_techniques
 
 **Retrieved but NOT passed to LLM:**
-- Groups (which threat actors use each technique) - available in CLI/REPL display only
+- Groups (which threat actors use each technique)
+- Campaigns (which campaigns used each technique)
+
+These are available in CLI/REPL display but don't influence LLM reasoning.
 
 ### TOON Format
 
@@ -340,10 +342,6 @@ T1110.003, Password Spraying, Credential Access, 0.87, Windows;Linux;Azure AD
 RELATED SOFTWARE
 software_id, name, type, implements_techniques
 S0154, Cobalt Strike, Tool, T1110.003;T1059.001
-
-RELATED CAMPAIGNS
-campaign_id, name, uses_techniques
-C0027, Operation Ghost, T1110.003
 
 AVAILABLE MITIGATIONS
 mitigation_id, name, addresses, inherited

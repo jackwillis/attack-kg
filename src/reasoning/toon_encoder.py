@@ -383,7 +383,7 @@ def build_toon_context(
     include_description: bool = True,
     include_data_sources: bool = True,
     include_software: bool = True,
-    include_campaigns: bool = True,
+    include_campaigns: bool = False,  # Off by default - rarely useful for remediation
     include_detection_strategies: bool = True,
     adjacent_techniques: list[Any] | None = None,
     kill_chain_context: str = "",
