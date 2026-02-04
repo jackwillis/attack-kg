@@ -1158,6 +1158,68 @@ class AttackGraph:
         log_d3fend_lookup(attack_id, mitigations, d3fend_results)
         return d3fend_results
 
+    # -------------------------------------------------------------------------
+    # Co-occurrence analysis
+    # -------------------------------------------------------------------------
+
+    def get_cooccurring_techniques(
+        self,
+        attack_id: str,
+        min_cooccurrence: int = 2,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """
+        Get techniques that frequently co-occur with the given technique.
+
+        Co-occurrence is determined by how often techniques appear together
+        in the same campaigns or are used by the same threat groups.
+
+        Args:
+            attack_id: ATT&CK technique ID (e.g., T1110.003)
+            min_cooccurrence: Minimum number of shared campaigns/groups
+            limit: Maximum number of results
+
+        Returns:
+            List of co-occurring techniques with occurrence counts
+        """
+        tech_uri = f"<https://attack.mitre.org/technique/{attack_id}>"
+
+        # Query for techniques that co-occur via campaigns OR groups
+        sparql = f"""
+        PREFIX attack: <https://attack.mitre.org/>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+        SELECT ?relatedId ?relatedName (COUNT(DISTINCT ?container) AS ?count)
+        WHERE {{
+            # Find campaigns or groups that use the seed technique
+            ?container attack:uses {tech_uri} .
+
+            # Find other techniques used by the same campaigns/groups
+            ?container attack:uses ?related .
+
+            ?related a attack:Technique ;
+                     attack:attackId ?relatedId ;
+                     rdfs:label ?relatedName .
+
+            # Exclude the seed technique itself
+            FILTER(?relatedId != "{attack_id}")
+        }}
+        GROUP BY ?relatedId ?relatedName
+        HAVING(COUNT(DISTINCT ?container) >= {min_cooccurrence})
+        ORDER BY DESC(?count)
+        LIMIT {limit}
+        """
+
+        results = self.query(sparql, context="get_cooccurring_techniques")
+        return [
+            {
+                "attack_id": r["relatedId"],
+                "name": r["relatedName"],
+                "cooccurrence_count": int(r["count"]),
+            }
+            for r in results
+        ]
+
     def get_all_d3fend_techniques(self, limit: int = 100) -> list[dict[str, str]]:
         """
         Get all D3FEND techniques.

@@ -16,13 +16,16 @@ sequenceDiagram
     CLI->>Hybrid: query(narrative, top_k=10)
 
     rect rgb(230, 245, 255)
-        Note over Hybrid,BM25: Step 1: Hybrid Retrieval (RRF Fusion)<br/>Includes ATT&CK + LOLBAS + GTFOBins
+        Note over Hybrid,BM25: Step 1: Hybrid Retrieval (RRF + Co-occurrence)<br/>Includes ATT&CK + LOLBAS + GTFOBins
         Hybrid->>Vectors: embed(narrative)
         Vectors-->>Hybrid: semantic candidates + similarity scores
         Hybrid->>BM25: tokenize + search(narrative)
         BM25-->>Hybrid: keyword candidates + BM25 scores
         Note over Hybrid: Reciprocal Rank Fusion<br/>score = Σ 1/(k + rank)
-        Hybrid-->>Hybrid: fused candidates [T1110.003, T1078, ...]
+        Hybrid->>Graph: get_cooccurring_techniques(top_3)
+        Graph-->>Hybrid: techniques that co-occur in campaigns/groups
+        Note over Hybrid: Boost techniques that appear<br/>together in real attacks
+        Hybrid-->>Hybrid: re-ranked candidates [T1110.003, T1078, ...]
     end
 
     rect rgb(255, 245, 230)

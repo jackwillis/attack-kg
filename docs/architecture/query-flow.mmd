@@ -24,7 +24,16 @@ sequenceDiagram
         HybridEngine->>Keyword: search(finding_text)
         Keyword-->>HybridEngine: KeywordResult[] (BM25 scores)
         Note over HybridEngine: Reciprocal Rank Fusion<br/>score(d) = Σ 1/(60 + rank)
-        HybridEngine->>HybridEngine: Fuse results, take top_k
+        HybridEngine->>HybridEngine: Fuse results
+    end
+
+    rect rgb(255, 248, 220)
+        Note over HybridEngine,Oxigraph: Co-occurrence Inductive Bias
+        HybridEngine->>Graph: get_cooccurring_techniques(top_3_seeds)
+        Graph->>Oxigraph: SPARQL: techniques in same campaigns/groups
+        Oxigraph-->>Graph: co-occurring techniques + counts
+        Note over HybridEngine: Boost techniques that appear together<br/>in real-world attacks (campaigns/groups)
+        HybridEngine->>HybridEngine: Re-rank by boosted scores
     end
 
     rect rgb(212, 237, 218)
@@ -60,4 +69,4 @@ sequenceDiagram
         CLI->>CLI: Validate all IDs against retrieval set
     end
 
-    CLI-->>User: Techniques (validated),<br/>Mitigations (prioritized),<br/>D3FEND Countermeasures,<br/>Kill Chain Analysis
+    CLI-->>User: Techniques (validated),<br/>Mitigations (prioritized),<br/>D3FEND Countermeasures

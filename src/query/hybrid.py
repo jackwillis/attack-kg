@@ -54,9 +54,11 @@ class EnrichedTechnique:
     detection_strategies: list[dict[str, str]] = field(default_factory=list)
     campaigns: list[dict[str, str]] = field(default_factory=list)
     url: str = ""
+    # Co-occurrence context
+    cooccurrence_boost: float = 0.0  # How much this technique was boosted by co-occurrence
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "attack_id": self.attack_id,
             "name": self.name,
             "description": self.description,
@@ -74,6 +76,9 @@ class EnrichedTechnique:
             "campaigns": self.campaigns,
             "url": self.url,
         }
+        if self.cooccurrence_boost > 0:
+            result["cooccurrence_boost"] = self.cooccurrence_boost
+        return result
 
 
 @dataclass
@@ -208,12 +213,89 @@ class HybridQueryEngine:
 
         return combined
 
+    def _boost_with_cooccurrence(
+        self,
+        combined: list[dict[str, Any]],
+        top_k: int,
+        boost_factor: float = 1.3,
+        seed_count: int = 3,
+    ) -> list[dict[str, Any]]:
+        """
+        Boost scores of techniques that co-occur with high-ranking ones.
+
+        This implements an inductive bias: if technique A is highly ranked,
+        boost techniques that frequently appear alongside A in real attacks
+        (campaigns/groups).
+
+        Args:
+            combined: RRF-fused results with scores
+            top_k: Number of results to return
+            boost_factor: Multiplier for co-occurring techniques (default 1.3)
+            seed_count: Number of top techniques to use as seeds (default 3)
+
+        Returns:
+            Re-ranked results with co-occurrence boosting applied
+        """
+        if not combined:
+            return combined
+
+        # Track which techniques received boosts and why
+        boosts: dict[str, dict[str, Any]] = {}
+
+        # Use top seed_count techniques as seeds for co-occurrence lookup
+        for seed in combined[:seed_count]:
+            seed_id = seed["attack_id"]
+            cooccurring = self.graph.get_cooccurring_techniques(
+                seed_id,
+                min_cooccurrence=2,
+                limit=15,
+            )
+
+            # Boost co-occurring techniques in the ranked list
+            for cooc in cooccurring:
+                cooc_id = cooc["attack_id"]
+                for item in combined:
+                    if item["attack_id"] == cooc_id:
+                        # Calculate boost based on co-occurrence strength
+                        cooc_count = cooc["cooccurrence_count"]
+                        # Diminishing returns: sqrt to prevent runaway boosting
+                        strength = min(boost_factor, 1.0 + (cooc_count ** 0.5) * 0.1)
+
+                        if cooc_id not in boosts:
+                            boosts[cooc_id] = {
+                                "original_score": item["rrf_score"],
+                                "boost_sources": [],
+                                "total_boost": 1.0,
+                            }
+
+                        boosts[cooc_id]["boost_sources"].append({
+                            "seed": seed_id,
+                            "cooccurrence_count": cooc_count,
+                        })
+                        boosts[cooc_id]["total_boost"] *= strength
+                        break
+
+        # Apply boosts to scores
+        for item in combined:
+            attack_id = item["attack_id"]
+            if attack_id in boosts:
+                boost_info = boosts[attack_id]
+                item["rrf_score"] *= boost_info["total_boost"]
+                item["cooccurrence_boost"] = boost_info["total_boost"]
+                item["cooccurrence_sources"] = boost_info["boost_sources"]
+
+        # Re-sort by adjusted scores
+        combined.sort(key=lambda x: x["rrf_score"], reverse=True)
+
+        return combined[:top_k * 2]  # Return more than top_k to allow for further filtering
+
     def query(
         self,
         question: str,
         top_k: int = 5,
         enrich: bool = True,
         use_bm25: bool = True,
+        use_cooccurrence: bool = True,
         use_kill_chain: bool = False,
         kill_chain_window: int = 2,
     ) -> HybridQueryResult:
@@ -225,7 +307,8 @@ class HybridQueryEngine:
             top_k: Number of technique results
             enrich: Whether to enrich with graph relationships
             use_bm25: Whether to use BM25 keyword search alongside semantic
-            use_kill_chain: Whether to add adjacent kill chain techniques
+            use_cooccurrence: Whether to boost techniques that co-occur in real attacks
+            use_kill_chain: Whether to add adjacent kill chain techniques (deprecated)
             kill_chain_window: Number of adjacent tactics to include
 
         Returns:
@@ -241,6 +324,10 @@ class HybridQueryEngine:
             # Combine with RRF
             combined = self._reciprocal_rank_fusion(semantic_results, keyword_results)
 
+            # Apply co-occurrence boosting if enabled
+            if use_cooccurrence:
+                combined = self._boost_with_cooccurrence(combined, top_k)
+
             # Take top_k and convert to pseudo-SemanticResult for enrichment
             top_results = combined[:top_k]
             enriched_techniques = []
@@ -255,7 +342,9 @@ class HybridQueryEngine:
                         platforms=item.get("platforms", []),
                     )
                     enriched = self._enrich_technique(pseudo_result)
-                    # Store RRF metadata
+                    # Store co-occurrence boost if present
+                    if "cooccurrence_boost" in item:
+                        enriched.cooccurrence_boost = item["cooccurrence_boost"]
                     enriched_techniques.append(enriched)
                 else:
                     enriched_techniques.append(EnrichedTechnique(
@@ -275,9 +364,10 @@ class HybridQueryEngine:
                 "top_k": top_k,
                 "enriched": enrich,
                 "result_count": len(enriched_techniques),
-                "retrieval_mode": "hybrid_rrf",
+                "retrieval_mode": "hybrid_rrf" + ("_cooccurrence" if use_cooccurrence else ""),
                 "semantic_candidates": len(semantic_results),
                 "keyword_candidates": len(keyword_results),
+                "cooccurrence_enabled": use_cooccurrence,
             }
         else:
             # Fallback to semantic-only
