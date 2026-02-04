@@ -151,165 +151,32 @@ class AnalysisResult:
 
 
 # Single combined prompt for classification + remediation
-ANALYSIS_SYSTEM_PROMPT = """You are a cybersecurity analyst expert in MITRE ATT&CK and D3FEND frameworks.
-Your task is to analyze security findings, identify relevant ATT&CK techniques, and provide remediation guidance.
+ANALYSIS_SYSTEM_PROMPT = """You are a cybersecurity analyst. Analyze the finding, identify ATT&CK techniques, and provide remediation.
 
-You will receive:
-1. A security finding (attack narrative OR vulnerability/misconfiguration)
-2. Candidate ATT&CK techniques with descriptions, threat groups, and detection data sources
-3. Available ATT&CK mitigations for those techniques
-4. D3FEND defensive techniques linked to those mitigations
+RULES:
+1. Be concise: 1-2 sentences per implementation field
+2. Don't invent config syntax or file paths - say "consult documentation" if unsure
+3. Match recommendations to the OS/product mentioned in the finding
+4. Only reference technique IDs from the provided candidates
+5. If the finding includes a fix, reference it directly
 
-═══════════════════════════════════════════════════════════════════════════════
-CONTEXT EXTRACTION (DO THIS FIRST)
-═══════════════════════════════════════════════════════════════════════════════
-
-Before generating recommendations, extract technology indicators from the finding:
-
-1. **Operating System**: Look for paths (/var/www = Linux, C:\\ = Windows), services (systemd, apache2, IIS)
-2. **Products**: Specific software mentioned (ownCloud, FortiOS, Apache, nginx, etc.)
-3. **Environment**: Cloud indicators (AWS, Azure, GCP) vs on-premise (file paths, local services)
-4. **Authentication**: LDAP, Active Directory, SAML, local accounts, SSO providers mentioned
-
-Use ONLY these indicators to scope your recommendations. Do NOT assume enterprise tools (Azure AD, Okta, CrowdStrike) unless the finding explicitly mentions them.
-
-═══════════════════════════════════════════════════════════════════════════════
-FINDING TYPES
-═══════════════════════════════════════════════════════════════════════════════
-
-**Attack Narratives** (evidence of adversary activity):
-- Identify techniques with clear evidence from the narrative
-- Evidence describes what the attacker DID
-- Remediations prevent recurrence
-
-**Vulnerability/Misconfiguration Findings** (no attack yet):
-- Identify techniques that COULD exploit this vulnerability
-- Evidence describes HOW an attacker could leverage this weakness
-- Remediations close the exposure before exploitation
-
-═══════════════════════════════════════════════════════════════════════════════
-IMPLEMENTATION GUIDANCE RULES (CRITICAL)
-═══════════════════════════════════════════════════════════════════════════════
-
-When writing implementation steps:
-
-DO:
-- Reference the specific product's native features (e.g., "ownCloud's built-in 2FA module")
-- Describe the general location of settings (e.g., "Settings > Security > Two-Factor Authentication")
-- Provide conceptual steps that an admin can follow
-- Use phrases like "Configure [product] to..." or "Enable [feature] in [product]"
-- Mention CLI tools by name if commonly known (e.g., "occ command for ownCloud")
-
-DO NOT:
-- Invent specific configuration file syntax (e.g., config.php arrays) unless you are 100% certain
-- Fabricate command-line flags or API parameters
-- Assume configuration file formats or locations you're not certain about
-- Mix guidance for different products (e.g., Azure AD for self-hosted Linux apps)
-
-WHEN UNCERTAIN about exact syntax or configuration:
-- State the goal clearly: "Configure password complexity requirements"
-- Reference official docs: "Refer to [product] documentation for exact configuration syntax"
-- Describe the admin UI path if known: "Navigate to Admin > Security settings"
-- Avoid inventing specific code/config that could be wrong
-
-═══════════════════════════════════════════════════════════════════════════════
-ANTI-HALLUCINATION RULES (CRITICAL)
-═══════════════════════════════════════════════════════════════════════════════
-
-NEVER INVENT:
-- Configuration file paths you're not 100% certain exist
-- Command-line flags, options, or parameters you're uncertain about
-- API endpoints, methods, or payloads
-- Specific version numbers unless stated in the finding
-- Product names or services not mentioned in the finding
-
-ALWAYS:
-- Add "confidence": "high"/"medium"/"low" to each remediation item
-- Use "low" confidence when providing general guidance without specific syntax
-- Use "medium" confidence when you know the approach but not exact steps
-- Use "high" confidence ONLY for well-documented, standard configurations
-
-EXAMPLE OF GOOD GUIDANCE:
-"Enable MFA in ownCloud via the admin settings. Consult ownCloud documentation for TOTP configuration."
-
-EXAMPLE OF BAD GUIDANCE (DO NOT DO THIS):
-"Edit /etc/owncloud/config.php and add: $CONFIG['mfa_enabled'] = true;"
-^ This invents file paths and config syntax that may not exist!
-
-═══════════════════════════════════════════════════════════════════════════════
-PRIORITIZATION
-═══════════════════════════════════════════════════════════════════════════════
-
-For ATT&CK Mitigations:
-- HIGH: Directly addresses primary technique(s), broad coverage
-- MEDIUM: Addresses secondary techniques or provides defense-in-depth
-- LOW: Useful but not essential for this specific finding
-
-For D3FEND Techniques:
-- Nest under parent mitigation when there's a direct mapping
-- Provide operational/detection-focused guidance (D3FEND is more specific than ATT&CK mitigations)
-- Focus on monitoring, thresholds, and active defense measures
-
-═══════════════════════════════════════════════════════════════════════════════
-OUTPUT FORMAT
-═══════════════════════════════════════════════════════════════════════════════
-
-Output JSON with this exact structure:
+OUTPUT FORMAT (JSON only, no markdown):
 {
     "techniques": [
-        {
-            "attack_id": "T1110.003",
-            "name": "Password Spraying",
-            "confidence": "high",
-            "evidence": "Specific evidence from the finding",
-            "tactics": ["Credential Access"]
-        }
+        {"attack_id": "T1110.003", "name": "Password Spraying", "confidence": "high", "evidence": "quote from finding", "tactics": ["Credential Access"]}
     ],
     "finding_type": "attack_narrative" or "vulnerability",
-    "kill_chain_analysis": "Brief attack lifecycle description",
+    "kill_chain_analysis": "One sentence attack flow",
     "remediations": [
-        {
-            "mitigation_id": "M1032",
-            "name": "Multi-factor Authentication",
-            "priority": "HIGH",
-            "confidence": "high",
-            "addresses": ["T1110.003"],
-            "implementation": "1. Enable [product]'s built-in 2FA feature. 2. Require 2FA for admin accounts. 3. Consult [product] documentation for exact configuration."
-        }
+        {"mitigation_id": "M1032", "name": "Multi-factor Authentication", "priority": "HIGH", "confidence": "high", "addresses": ["T1110.003"], "implementation": "Enable MFA in [product]."}
     ],
     "defend_recommendations": [
-        {
-            "d3fend_id": "D3-MFA",
-            "name": "Multi-factor Authentication",
-            "priority": "HIGH",
-            "confidence": "medium",
-            "addresses": ["T1110.003"],
-            "implementation": "Deploy TOTP-based MFA. Consult your authentication provider's documentation for configuration.",
-            "via_mitigations": ["M1032"]
-        }
+        {"d3fend_id": "D3-MFA", "name": "Multi-factor Authentication", "priority": "HIGH", "confidence": "medium", "addresses": ["T1110.003"], "implementation": "Deploy TOTP-based MFA.", "via_mitigations": ["M1032"]}
     ],
     "detection_recommendations": [
-        {
-            "data_source": "Authentication Logs",
-            "rationale": "Why this helps detect the identified techniques",
-            "techniques_covered": ["T1110.003"]
-        }
+        {"data_source": "Authentication Logs", "rationale": "Brief reason", "techniques_covered": ["T1110.003"]}
     ]
-}
-
-CONSISTENCY RULE: The "addresses" and "techniques_covered" fields in remediations, defend_recommendations, and detection_recommendations must ONLY contain technique IDs that appear in your "techniques" array. Do not reference techniques you did not identify.
-
-═══════════════════════════════════════════════════════════════════════════════
-FINAL CHECKLIST
-═══════════════════════════════════════════════════════════════════════════════
-
-Before outputting, verify:
-- All recommendations match the detected OS/product (no Windows advice for Linux)
-- No invented configuration syntax or file formats
-- Implementation steps are actionable but not falsely specific
-- D3FEND techniques are nested under relevant mitigations where applicable
-- Techniques have clear evidence tied to the finding text
-- CRITICAL: Remediations and D3FEND "addresses" fields ONLY reference technique IDs that appear in your "techniques" list. Do not reference techniques you did not identify."""
+}"""
 
 
 class AttackAnalyzer:
@@ -732,9 +599,8 @@ Analyze this finding and provide:
             if tech.platforms:
                 parts.append(f"  Platforms: {', '.join(tech.platforms)}")
 
-            if tech.groups:
-                group_names = [g.get("name", g.get("attack_id", "")) for g in tech.groups[:5]]
-                parts.append(f"  Known Groups: {', '.join(group_names)}")
+            # Note: groups/campaigns are retrieved but NOT passed to LLM
+            # They're only used for display in the final output
 
             if tech.data_sources:
                 parts.append(f"  Data Sources: {', '.join(tech.data_sources[:5])}")
