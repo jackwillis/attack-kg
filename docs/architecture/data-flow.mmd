@@ -43,7 +43,7 @@ sequenceDiagram
 
     rect rgb(255, 230, 230)
         Note over CLI,LLM: Step 3: Single-Stage LLM Analysis (default)
-        CLI->>CLI: Build TOON context (techniques, software,<br/>campaigns, mitigations, D3FEND, detections)
+        CLI->>CLI: Build TOON context (techniques, software,<br/>mitigations, D3FEND, detections, kill chain)
         CLI->>LLM: analyze(narrative, TOON_context)
         Note right of LLM: Classify techniques + write remediation<br/>Constrained to provided candidates<br/>Output: techniques, mitigations, D3FEND
         LLM-->>CLI: AnalysisResult JSON

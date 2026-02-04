@@ -27,12 +27,11 @@ uv run attack-kg technique T1110.003    # Lookup technique
 uv run attack-kg group APT29            # Group techniques
 uv run attack-kg search "credential theft"  # Semantic search
 uv run attack-kg search "certutil download" --hybrid  # Hybrid BM25+semantic search
-uv run attack-kg analyze "password spraying against Azure AD"  # Full analysis (TOON, hybrid, kill-chain all default on)
+uv run attack-kg analyze "password spraying against Azure AD"  # Full analysis (TOON and hybrid enabled by default)
 uv run attack-kg analyze --file finding.txt  # Analyze from file
 uv run attack-kg analyze --two-stage "finding"  # Enable two-stage LLM pipeline (experimental)
 uv run attack-kg analyze --no-toon "finding"  # Use JSON format instead of TOON
 uv run attack-kg analyze --no-hybrid "finding"  # Semantic-only retrieval
-uv run attack-kg analyze --no-kill-chain "finding"  # Disable kill chain expansion
 uv run attack-kg countermeasures T1110.003  # Get D3FEND countermeasures for technique
 uv run attack-kg query "SELECT ..."     # Raw SPARQL
 uv run attack-kg repl                   # Interactive mode (all features enabled by default)
@@ -150,7 +149,7 @@ The system processes these STIX entity types into the RDF graph:
 ### HybridQueryEngine Methods
 
 **Core Query Methods:**
-- `query(question, top_k, enrich, use_bm25, use_kill_chain)` - Hybrid search with optional BM25 and kill chain expansion
+- `query(question, top_k, enrich, use_bm25)` - Hybrid search with optional BM25
 - `find_defenses_for_finding(finding_text)` - Get techniques and mitigations for a finding
 - `get_threat_context(technique_id)` - Full context for a technique
 - `compare_groups(group1_id, group2_id)` - Compare two threat groups
@@ -163,9 +162,8 @@ The system processes these STIX entity types into the RDF graph:
 - `get_detection_coverage(data_sources)` - Analyze what you can detect with available data
 - `find_by_data_source(data_source)` - Find techniques detectable by a data source
 
-**Platform & Kill Chain:**
+**Platform Analysis:**
 - `get_attack_surface(platforms)` - Techniques organized by tactic for specific platforms
-- `analyze_kill_chain(finding_text)` - Map finding across kill chain phases
 
 **Entity Profiles:**
 - `get_group_profile(group_id)` - Comprehensive group profile with TTPs and software
@@ -217,13 +215,6 @@ sparql = f"{tech_uri} ..."
 - LOLBAS/GTFOBins provide explicit tool → technique mappings (certutil → T1105)
 - RRF formula: `score(d) = sum(1 / (k + rank(d)))` where k=60
 
-**Kill Chain Inductive Bias**: When enabled, adds techniques from adjacent kill chain phases:
-```
-Reconnaissance → Resource Development → Initial Access → Execution →
-Persistence → Privilege Escalation → Defense Evasion → Credential Access →
-Discovery → Lateral Movement → Collection → C2 → Exfiltration → Impact
-```
-
 ### Analysis Pipeline Diagram (Single-Stage, Default)
 
 ```
@@ -241,12 +232,6 @@ Discovery → Lateral Movement → Collection → C2 → Exfiltration → Impact
 │         └────────┬─────────┘             │
 │                  ▼                       │
 │         Reciprocal Rank Fusion           │
-└──────────────────────────────────────────┘
-       │
-       ▼
-┌──────────────────────────────────────────┐
-│        KILL CHAIN EXPANSION              │
-│  Add techniques from adjacent phases     │
 └──────────────────────────────────────────┘
        │
        ▼
@@ -281,7 +266,6 @@ Discovery → Lateral Movement → Collection → C2 → Exfiltration → Impact
 | Single-Stage LLM | ✓ Enabled | `--two-stage` to enable experimental two-stage |
 | TOON Format | ✓ Enabled | `--no-toon` |
 | Hybrid Retrieval | ✓ Enabled | `--no-hybrid` |
-| Kill Chain Bias | ✓ Enabled | `--no-kill-chain` |
 
 ### LLM Analysis Modes
 
@@ -322,7 +306,6 @@ The graph retrieves rich relationships for each technique. Most are passed to th
 - D3FEND: d3fend_id, name, via_mitigation, addresses, definition
 - Detection Strategies: strategy, detects_techniques (top 10 by coverage)
 - Data Sources: data_source, techniques_covered
-- Kill Chain: detected_tactics, adjacent_tactics, adjacent_techniques
 
 **Retrieved but NOT passed to LLM:**
 - Groups (which threat actors use each technique)

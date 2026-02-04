@@ -343,39 +343,6 @@ def data_sources_to_toon(techniques: list[Any]) -> str:
     return encode_table(headers, rows, "DATA SOURCES")
 
 
-def kill_chain_to_toon(
-    detected_tactics: list[str],
-    adjacent_tactics: list[str],
-    adjacent_techniques: list[Any],
-) -> str:
-    """
-    Format kill chain context in TOON format.
-
-    Args:
-        detected_tactics: Tactics detected in the finding
-        adjacent_tactics: Next likely tactics in kill chain
-        adjacent_techniques: Techniques from adjacent tactics
-
-    Returns:
-        TOON-formatted kill chain context
-    """
-    lines = ["KILL CHAIN CONTEXT"]
-    lines.append(f"detected_tactics: {';'.join(detected_tactics)}")
-    lines.append(f"next_likely_tactics: {';'.join(adjacent_tactics)}")
-
-    if adjacent_techniques:
-        lines.append("")
-        lines.append("ADJACENT TECHNIQUES (from next phases)")
-        headers = ["attack_id", "name", "tactic", "priority"]
-        rows = []
-        for tech in adjacent_techniques:
-            tactic = tech.tactics[0] if tech.tactics else ""
-            rows.append([tech.attack_id, tech.name, tactic, "consider"])
-        lines.append(encode_table(headers, rows))
-
-    return "\n".join(lines)
-
-
 def build_toon_context(
     techniques: list[Any],
     mitigations: list[dict[str, Any]],
@@ -385,8 +352,6 @@ def build_toon_context(
     include_software: bool = True,
     include_campaigns: bool = False,  # Off by default - rarely useful for remediation
     include_detection_strategies: bool = True,
-    adjacent_techniques: list[Any] | None = None,
-    kill_chain_context: str = "",
 ) -> str:
     """
     Build complete TOON-formatted context for LLM.
@@ -402,8 +367,6 @@ def build_toon_context(
         include_software: Include related software (malware/tools)
         include_campaigns: Include related campaigns
         include_detection_strategies: Include detection strategies
-        adjacent_techniques: Kill chain adjacent techniques
-        kill_chain_context: Kill chain context string
 
     Returns:
         Complete TOON-formatted context string
@@ -440,27 +403,6 @@ def build_toon_context(
     # Data sources for detection
     if include_data_sources and techniques:
         sections.append(data_sources_to_toon(techniques))
-
-    # Kill chain context
-    if adjacent_techniques:
-        detected = set()
-        for tech in techniques:
-            for tactic in tech.tactics:
-                detected.add(tactic.lower().replace(" ", "-"))
-
-        adjacent_tactics = []
-        if kill_chain_context:
-            # Parse from context string
-            parts = kill_chain_context.split("Next likely: ")
-            if len(parts) > 1:
-                adjacent_tactics = [t.strip() for t in parts[1].split(",")]
-
-        if detected or adjacent_tactics:
-            sections.append(kill_chain_to_toon(
-                list(detected),
-                adjacent_tactics,
-                adjacent_techniques,
-            ))
 
     return "\n\n".join(sections)
 
