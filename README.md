@@ -240,14 +240,14 @@ uv run attack-kg analyze --no-kill-chain "finding"    # No kill chain expansion
 │  │                                                                       │  │
 │  │  Input: Finding + TOON candidates                                    │  │
 │  │  Task: Select which techniques apply, with evidence                   │  │
-│  │  Output: Selected technique IDs + confidence + evidence              │  │
+│  │  Output: IDs only (id, confidence, evidence)                         │  │
 │  │                                                                       │  │
 │  │  ┌─────────────────────────────────────────────────────────────────┐ │  │
-│  │  │ LLM (gpt-oss:20b)                                               │ │  │
-│  │  │ "Select techniques from candidates that match the finding"      │ │  │
+│  │  │ LLM: "Select techniques from candidates that match the finding" │ │  │
 │  │  └─────────────────────────────────────────────────────────────────┘ │  │
 │  │                                                                       │  │
 │  │  Validation: Filter hallucinated IDs (only keep IDs from candidates) │  │
+│  │  Rehydration: Look up name, tactic, description from graph          │  │
 │  └──────────────────────────────────────────────────────────────────────┘  │
 │                         │                                                   │
 │                         ▼                                                   │
@@ -266,15 +266,14 @@ uv run attack-kg analyze --no-kill-chain "finding"    # No kill chain expansion
 │  │                                                                       │  │
 │  │  Input: Finding + Selected techniques + Mitigations + D3FEND         │  │
 │  │  Task: Write product-specific implementation guidance                │  │
-│  │  Output: Prioritized remediations + D3FEND recommendations           │  │
+│  │  Output: IDs only (id, priority, implementation)                     │  │
 │  │                                                                       │  │
 │  │  ┌─────────────────────────────────────────────────────────────────┐ │  │
-│  │  │ LLM (gpt-oss:20b)                                               │ │  │
-│  │  │ Context extraction: OS, products, environment from finding      │ │  │
-│  │  │ "Write remediation for the selected techniques"                 │ │  │
+│  │  │ LLM: Context extraction → "Write remediation for techniques"    │ │  │
 │  │  └─────────────────────────────────────────────────────────────────┘ │  │
 │  │                                                                       │  │
 │  │  Validation: Filter invalid mitigation/D3FEND IDs                    │  │
+│  │  Rehydration: Look up names from graph (mitigations, D3FEND)        │  │
 │  └──────────────────────────────────────────────────────────────────────┘  │
 │                         │                                                   │
 │                         ▼                                                   │
@@ -373,3 +372,43 @@ src/
       selector.py  # Stage 1: Technique selection from candidates
       remediator.py # Stage 2: Remediation guidance generation
 ```
+
+## Hallucination Mitigation
+
+The system uses multiple strategies to reduce LLM hallucinations:
+
+1. **ID Validation**: LLM outputs are filtered to only include technique/mitigation/D3FEND IDs that exist in the retrieval context
+2. **Graph Rehydration**: Names and metadata come from the authoritative knowledge graph, not LLM output
+3. **Constrained Selection**: Stage 1 prompt explicitly restricts selection to provided candidates
+4. **Evidence Extraction**: LLM must cite specific text from the finding as evidence
+
+## License
+
+This project is licensed under the **MIT License** - see [LICENSE](LICENSE) for details.
+
+## Data Sources & Attribution
+
+This project integrates data from the following sources:
+
+| Source | License | Usage |
+|--------|---------|-------|
+| [MITRE ATT&CK](https://attack.mitre.org/) | [Apache 2.0](https://github.com/mitre/cti/blob/master/LICENSE) | Techniques, tactics, groups, software, mitigations |
+| [MITRE D3FEND](https://d3fend.mitre.org/) | [Apache 2.0](https://github.com/d3fend/d3fend-ontology/blob/master/LICENSE) | Defensive techniques ontology |
+
+### Python Dependencies
+
+Key dependencies (see `pyproject.toml` for full list):
+
+| Package | License | Purpose |
+|---------|---------|---------|
+| [pyoxigraph](https://github.com/oxigraph/oxigraph) | MIT/Apache 2.0 | RDF triplestore |
+| [chromadb](https://github.com/chroma-core/chroma) | Apache 2.0 | Vector store |
+| [sentence-transformers](https://github.com/UKPLab/sentence-transformers) | Apache 2.0 | Embeddings |
+| [rank-bm25](https://github.com/dorianbrown/rank_bm25) | Apache 2.0 | BM25 keyword search |
+| [typer](https://github.com/tiangolo/typer) | MIT | CLI framework |
+| [rich](https://github.com/Textualize/rich) | MIT | Terminal formatting |
+
+## Acknowledgments
+
+- MITRE Corporation for ATT&CK and D3FEND frameworks
+- The open-source security community

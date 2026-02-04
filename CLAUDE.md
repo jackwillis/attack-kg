@@ -240,7 +240,8 @@ Discovery → Lateral Movement → Collection → C2 → Exfiltration → Impact
 ┌──────────────────────────────────────────┐
 │  STAGE 1: NODE SELECTION (LLM)           │
 │  "Which candidates apply to finding?"    │
-│  Output: technique IDs + confidence      │
+│  Output: IDs only (id, confidence, evid) │
+│  + Rehydrate names/tactics from graph    │
 └──────────────────────────────────────────┘
        │
        ▼
@@ -253,7 +254,8 @@ Discovery → Lateral Movement → Collection → C2 → Exfiltration → Impact
 ┌──────────────────────────────────────────┐
 │  STAGE 2: REMEDIATION WRITING (LLM)      │
 │  "How do we fix the selected issues?"    │
-│  Output: prioritized implementation      │
+│  Output: IDs only (id, priority, impl)   │
+│  + Rehydrate names from graph            │
 └──────────────────────────────────────────┘
        │
        ▼
@@ -283,6 +285,15 @@ Finding → Retrieval → LLM1 (Select Nodes) → LLM2 (Write Remediation) → R
 - Stage 2 focuses on: "How do we fix the selected issues?"
 - Reduces hallucination by constraining Stage 1 to candidates
 - Better product-specific guidance (Stage 2 has full context)
+
+### Hallucination Mitigation
+
+The system uses multiple strategies to reduce LLM hallucinations:
+
+1. **ID Validation**: Filter LLM outputs to only include IDs present in retrieval context
+2. **Graph Rehydration**: Names/metadata come from authoritative graph, not LLM output
+3. **Constrained Selection**: Stage 1 prompt restricts selection to provided candidates
+4. **Labels-Only Output**: LLMs output IDs only; system looks up names from graph
 
 **Single-Stage**: One LLM call for classification + remediation
 - Faster, simpler
