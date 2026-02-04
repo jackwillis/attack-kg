@@ -14,6 +14,24 @@ console = Console()
 # Entity type literals
 EntityType = Literal["technique", "group", "software", "mitigation", "campaign", "tactic", "data_source"]
 
+# Kill chain order for inductive bias
+KILL_CHAIN_ORDER = [
+    "reconnaissance",
+    "resource-development",
+    "initial-access",
+    "execution",
+    "persistence",
+    "privilege-escalation",
+    "defense-evasion",
+    "credential-access",
+    "discovery",
+    "lateral-movement",
+    "collection",
+    "command-and-control",
+    "exfiltration",
+    "impact",
+]
+
 
 @dataclass
 class EnrichedTechnique:
@@ -65,12 +83,16 @@ class HybridQueryResult:
     query: str
     techniques: list[EnrichedTechnique]
     metadata: dict[str, Any] = field(default_factory=dict)
+    adjacent_techniques: list[EnrichedTechnique] = field(default_factory=list)
+    kill_chain_context: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "query": self.query,
             "techniques": [t.to_dict() for t in self.techniques],
             "metadata": self.metadata,
+            "adjacent_techniques": [t.to_dict() for t in self.adjacent_techniques],
+            "kill_chain_context": self.kill_chain_context,
         }
 
 
@@ -80,8 +102,10 @@ class HybridQueryEngine:
 
     This is the core neuro-symbolic query engine that:
     1. Uses vector similarity to find relevant techniques
-    2. Uses SPARQL to enrich results with relationships
-    3. Provides structured context for LLM reasoning
+    2. Uses BM25 keyword search for exact term matches
+    3. Combines results using Reciprocal Rank Fusion (RRF)
+    4. Uses SPARQL to enrich results with relationships
+    5. Provides structured context for LLM reasoning
     """
 
     def __init__(
@@ -92,6 +116,7 @@ class HybridQueryEngine:
         *,
         graph: AttackGraph | None = None,
         semantic: SemanticSearchEngine | None = None,
+        enable_bm25: bool = True,
     ):
         """
         Initialize the hybrid query engine.
@@ -102,15 +127,95 @@ class HybridQueryEngine:
             embedding_model: Sentence transformer model
             graph: Existing AttackGraph instance (avoids lock conflicts)
             semantic: Existing SemanticSearchEngine instance
+            enable_bm25: Whether to enable BM25 keyword search (default True)
         """
         self.graph = graph if graph is not None else AttackGraph(graph_path)
         self.semantic = semantic if semantic is not None else SemanticSearchEngine(vector_path, embedding_model)
+
+        # Initialize keyword search engine (lazy-loaded)
+        self._keyword_engine = None
+        self._enable_bm25 = enable_bm25
+
+    @property
+    def keyword(self):
+        """Lazy-load the keyword search engine."""
+        if self._keyword_engine is None and self._enable_bm25:
+            from src.query.keyword import KeywordSearchEngine
+            self._keyword_engine = KeywordSearchEngine(self.graph)
+        return self._keyword_engine
+
+    def _reciprocal_rank_fusion(
+        self,
+        semantic_results: list[SemanticResult],
+        keyword_results: list,
+        k: int = 60,
+    ) -> list[dict[str, Any]]:
+        """
+        Combine semantic and keyword results using Reciprocal Rank Fusion.
+
+        RRF formula: score(d) = sum(1 / (k + rank(d)))
+
+        Args:
+            semantic_results: Results from semantic search
+            keyword_results: Results from BM25 keyword search
+            k: RRF constant (default 60, as per original RRF paper)
+
+        Returns:
+            Combined results sorted by RRF score
+        """
+        scores: dict[str, float] = {}
+        result_data: dict[str, dict] = {}
+
+        # Add semantic results
+        for rank, result in enumerate(semantic_results, start=1):
+            attack_id = result.attack_id
+            scores[attack_id] = scores.get(attack_id, 0) + 1 / (k + rank)
+            if attack_id not in result_data:
+                result_data[attack_id] = {
+                    "attack_id": attack_id,
+                    "name": result.name,
+                    "tactics": result.tactics,
+                    "platforms": result.platforms,
+                    "semantic_similarity": result.similarity,
+                    "semantic_rank": rank,
+                }
+
+        # Add keyword results
+        for rank, result in enumerate(keyword_results, start=1):
+            attack_id = result.attack_id
+            scores[attack_id] = scores.get(attack_id, 0) + 1 / (k + rank)
+            if attack_id not in result_data:
+                result_data[attack_id] = {
+                    "attack_id": attack_id,
+                    "name": result.name,
+                    "tactics": result.tactics,
+                    "platforms": result.platforms,
+                    "bm25_score": result.score,
+                    "bm25_rank": rank,
+                }
+            else:
+                result_data[attack_id]["bm25_score"] = result.score
+                result_data[attack_id]["bm25_rank"] = rank
+
+        # Sort by RRF score
+        sorted_ids = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)
+
+        combined = []
+        for attack_id in sorted_ids:
+            data = result_data[attack_id]
+            data["rrf_score"] = scores[attack_id]
+            combined.append(data)
+
+        return combined
 
     def query(
         self,
         question: str,
         top_k: int = 5,
         enrich: bool = True,
+        use_bm25: bool = True,
+        use_kill_chain: bool = False,
+        kill_chain_window: int = 2,
     ) -> HybridQueryResult:
         """
         Execute a hybrid query.
@@ -119,41 +224,176 @@ class HybridQueryEngine:
             question: Natural language question or finding description
             top_k: Number of technique results
             enrich: Whether to enrich with graph relationships
+            use_bm25: Whether to use BM25 keyword search alongside semantic
+            use_kill_chain: Whether to add adjacent kill chain techniques
+            kill_chain_window: Number of adjacent tactics to include
 
         Returns:
             HybridQueryResult with techniques and context
         """
-        # Step 1: Semantic search for relevant techniques
-        semantic_results = self.semantic.search(question, top_k=top_k)
+        # Step 1: Get semantic search results
+        semantic_results = self.semantic.search(question, top_k=top_k * 2 if use_bm25 else top_k)
 
-        # Step 2: Enrich each result with graph data
-        enriched_techniques = []
-        for result in semantic_results:
-            if enrich:
-                enriched = self._enrich_technique(result)
-            else:
-                enriched = EnrichedTechnique(
-                    attack_id=result.attack_id,
-                    name=result.name,
-                    description="",
-                    similarity=result.similarity,
-                    tactics=result.tactics,
-                    groups=[],
-                    mitigations=[],
-                    software=[],
-                    subtechniques=[],
-                )
-            enriched_techniques.append(enriched)
+        # Step 2: Optionally get BM25 keyword results and fuse with RRF
+        if use_bm25 and self._enable_bm25 and self.keyword:
+            keyword_results = self.keyword.search(question, top_k=top_k * 2)
+
+            # Combine with RRF
+            combined = self._reciprocal_rank_fusion(semantic_results, keyword_results)
+
+            # Take top_k and convert to pseudo-SemanticResult for enrichment
+            top_results = combined[:top_k]
+            enriched_techniques = []
+            for item in top_results:
+                if enrich:
+                    # Create a minimal SemanticResult for enrichment
+                    pseudo_result = SemanticResult(
+                        attack_id=item["attack_id"],
+                        name=item["name"],
+                        similarity=item.get("semantic_similarity", item.get("rrf_score", 0)),
+                        tactics=item.get("tactics", []),
+                        platforms=item.get("platforms", []),
+                    )
+                    enriched = self._enrich_technique(pseudo_result)
+                    # Store RRF metadata
+                    enriched_techniques.append(enriched)
+                else:
+                    enriched_techniques.append(EnrichedTechnique(
+                        attack_id=item["attack_id"],
+                        name=item["name"],
+                        description="",
+                        similarity=item.get("rrf_score", 0),
+                        tactics=item.get("tactics", []),
+                        groups=[],
+                        mitigations=[],
+                        software=[],
+                        subtechniques=[],
+                        platforms=item.get("platforms", []),
+                    ))
+
+            metadata = {
+                "top_k": top_k,
+                "enriched": enrich,
+                "result_count": len(enriched_techniques),
+                "retrieval_mode": "hybrid_rrf",
+                "semantic_candidates": len(semantic_results),
+                "keyword_candidates": len(keyword_results),
+            }
+        else:
+            # Fallback to semantic-only
+            enriched_techniques = []
+            for result in semantic_results[:top_k]:
+                if enrich:
+                    enriched = self._enrich_technique(result)
+                else:
+                    enriched = EnrichedTechnique(
+                        attack_id=result.attack_id,
+                        name=result.name,
+                        description="",
+                        similarity=result.similarity,
+                        tactics=result.tactics,
+                        groups=[],
+                        mitigations=[],
+                        software=[],
+                        subtechniques=[],
+                    )
+                enriched_techniques.append(enriched)
+
+            metadata = {
+                "top_k": top_k,
+                "enriched": enrich,
+                "result_count": len(enriched_techniques),
+                "retrieval_mode": "semantic_only",
+            }
+
+        # Step 3: Optionally add kill chain adjacent techniques
+        adjacent_techniques = []
+        kill_chain_context = ""
+        if use_kill_chain and enriched_techniques:
+            detected_tactics = set()
+            for tech in enriched_techniques:
+                for tactic in tech.tactics:
+                    normalized = tactic.lower().replace(" ", "-")
+                    detected_tactics.add(normalized)
+
+            adjacent_tactics = self._get_adjacent_tactics(list(detected_tactics), kill_chain_window)
+            if adjacent_tactics:
+                adjacent_techniques = self._get_techniques_from_tactics(adjacent_tactics, limit=3)
+                kill_chain_context = f"Detected: {', '.join(sorted(detected_tactics))}. Next likely: {', '.join(adjacent_tactics)}"
+                metadata["kill_chain_detected"] = list(detected_tactics)
+                metadata["kill_chain_adjacent"] = adjacent_tactics
 
         return HybridQueryResult(
             query=question,
             techniques=enriched_techniques,
-            metadata={
-                "top_k": top_k,
-                "enriched": enrich,
-                "result_count": len(enriched_techniques),
-            },
+            metadata=metadata,
+            adjacent_techniques=adjacent_techniques,
+            kill_chain_context=kill_chain_context,
         )
+
+    def _get_adjacent_tactics(self, detected_tactics: list[str], window: int = 2) -> list[str]:
+        """
+        Get tactics that typically follow the detected ones in the kill chain.
+
+        Args:
+            detected_tactics: List of detected tactic shortnames (e.g., ["initial-access", "execution"])
+            window: Number of subsequent tactics to return
+
+        Returns:
+            List of adjacent tactic shortnames
+        """
+        indices = []
+        for tactic in detected_tactics:
+            if tactic in KILL_CHAIN_ORDER:
+                indices.append(KILL_CHAIN_ORDER.index(tactic))
+
+        if not indices:
+            return []
+
+        max_idx = max(indices)
+        adjacent = []
+        for i in range(1, window + 1):
+            next_idx = max_idx + i
+            if next_idx < len(KILL_CHAIN_ORDER):
+                adjacent.append(KILL_CHAIN_ORDER[next_idx])
+
+        return adjacent
+
+    def _get_techniques_from_tactics(self, tactics: list[str], limit: int = 3) -> list[EnrichedTechnique]:
+        """
+        Get representative techniques from the specified tactics.
+
+        Args:
+            tactics: List of tactic shortnames
+            limit: Maximum techniques per tactic
+
+        Returns:
+            List of EnrichedTechnique objects
+        """
+        techniques = []
+        seen_ids = set()
+
+        for tactic in tactics:
+            tactic_techs = self.graph.get_techniques_for_tactic(tactic)
+            count = 0
+            for tech in tactic_techs:
+                if tech["attack_id"] not in seen_ids and count < limit:
+                    seen_ids.add(tech["attack_id"])
+                    # Create a minimal enriched technique
+                    techniques.append(EnrichedTechnique(
+                        attack_id=tech["attack_id"],
+                        name=tech["name"],
+                        description="",
+                        similarity=0.5,  # Default similarity for adjacent techniques
+                        tactics=[tactic],
+                        groups=[],
+                        mitigations=[],
+                        software=[],
+                        subtechniques=[],
+                    ))
+                    count += 1
+
+        return techniques
 
     def _enrich_technique(self, semantic_result: SemanticResult) -> EnrichedTechnique:
         """Enrich a semantic result with graph relationships."""

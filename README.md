@@ -26,12 +26,22 @@ uv run attack-kg group APT29
 # Semantic search
 uv run attack-kg search "credential theft from memory"
 
+# Hybrid search (BM25 + semantic)
+uv run attack-kg search "certutil download" --hybrid
+
 # Get D3FEND countermeasures for a technique
 uv run attack-kg countermeasures T1110.003
 
 # Analyze a finding for ATT&CK techniques and remediation
+# (defaults: two-stage LLM, TOON format, hybrid retrieval, kill chain context)
 uv run attack-kg analyze "password spraying against Azure AD"
 uv run attack-kg analyze --file finding.txt
+
+# Analyze with specific options disabled
+uv run attack-kg analyze --single-stage "finding"  # Use single LLM call
+uv run attack-kg analyze --no-toon "finding"       # Use JSON format (more tokens)
+uv run attack-kg analyze --no-hybrid "finding"     # Semantic-only retrieval
+uv run attack-kg analyze --no-kill-chain "finding" # No kill chain expansion
 
 # Run SPARQL queries
 uv run attack-kg query "SELECT ?name WHERE { ?t a attack:Technique ; rdfs:label ?name } LIMIT 5"
@@ -111,11 +121,200 @@ ATTACK_KG_DEBUG=1 uv run attack-kg analyze "password spraying attack"
 
 Logs are written as JSON Lines to `~/.attack_kg/logs/session_YYYYMMDD_HHMMSS.jsonl`.
 
+## Analysis Pipeline
+
+The `analyze` command uses a sophisticated pipeline with the following features enabled by default:
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| **Two-Stage LLM** | Enabled | Separates node selection (Stage 1) from remediation writing (Stage 2) for reduced hallucination |
+| **TOON Format** | Enabled | Token-Oriented Object Notation reduces LLM context by ~40% |
+| **Hybrid Retrieval** | Enabled | BM25 keyword + semantic search with Reciprocal Rank Fusion |
+| **Kill Chain Bias** | Enabled | Suggests techniques from adjacent kill chain phases |
+
+To disable any feature, use the corresponding flag:
+```bash
+uv run attack-kg analyze --single-stage "finding"     # Single LLM call
+uv run attack-kg analyze --no-toon "finding"          # JSON format
+uv run attack-kg analyze --no-hybrid "finding"        # Semantic-only
+uv run attack-kg analyze --no-kill-chain "finding"    # No kill chain expansion
+```
+
 ## Architecture
+
+### System Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         ATT&CK Knowledge Graph                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌──────────────┐     ┌──────────────┐     ┌──────────────────────────────┐│
+│  │  STIX JSON   │────▶│ RDF Ingest   │────▶│        Oxigraph              ││
+│  │  (ATT&CK)    │     │              │     │    (52K+ triples)            ││
+│  └──────────────┘     └──────────────┘     │                              ││
+│                                            │  • Techniques (835)          ││
+│  ┌──────────────┐                          │  • Groups (187)              ││
+│  │  D3FEND TTL  │─────────────────────────▶│  • Mitigations (268)         ││
+│  │  (Ontology)  │                          │  • Software (787)            ││
+│  └──────────────┘                          │  • D3FEND (500+)             ││
+│                                            └──────────────────────────────┘│
+│                                                         │                   │
+│                                                         ▼                   │
+│                       ┌──────────────────────────────────────────────────┐ │
+│                       │              Embedding Pipeline                   │ │
+│                       │  nomic-embed-text-v1.5 (sentence-transformers)   │ │
+│                       └──────────────────────────────────────────────────┘ │
+│                                            │                                │
+│                                            ▼                                │
+│                       ┌──────────────────────────────────────────────────┐ │
+│                       │                ChromaDB                           │ │
+│                       │          (Vector Store + BM25 Index)              │ │
+│                       └──────────────────────────────────────────────────┘ │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Analysis Pipeline (Two-Stage)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           ANALYSIS PIPELINE                                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────┐                                                            │
+│  │   Finding   │                                                            │
+│  │   Text      │                                                            │
+│  └──────┬──────┘                                                            │
+│         │                                                                   │
+│         ▼                                                                   │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │                    HYBRID RETRIEVAL (RRF)                             │  │
+│  │  ┌────────────────────┐    ┌────────────────────┐                     │  │
+│  │  │  Semantic Search   │    │   BM25 Keyword     │                     │  │
+│  │  │  (ChromaDB)        │    │   Search           │                     │  │
+│  │  │                    │    │                    │                     │  │
+│  │  │  Embedding-based   │    │  Exact term match  │                     │  │
+│  │  │  similarity        │    │  (technique IDs,   │                     │  │
+│  │  │                    │    │   tool names)      │                     │  │
+│  │  └─────────┬──────────┘    └─────────┬──────────┘                     │  │
+│  │            │                         │                                │  │
+│  │            └────────────┬────────────┘                                │  │
+│  │                         ▼                                             │  │
+│  │              ┌──────────────────────┐                                 │  │
+│  │              │  Reciprocal Rank     │                                 │  │
+│  │              │  Fusion (k=60)       │                                 │  │
+│  │              │                      │                                 │  │
+│  │              │  score = Σ 1/(k+r)   │                                 │  │
+│  │              └──────────────────────┘                                 │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                         │                                                   │
+│                         ▼                                                   │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │                    KILL CHAIN EXPANSION                               │  │
+│  │                                                                       │  │
+│  │  Detected: Initial Access, Execution                                  │  │
+│  │      │                                                                │  │
+│  │      ▼                                                                │  │
+│  │  Adjacent: Persistence, Privilege Escalation (window=2)              │  │
+│  │      │                                                                │  │
+│  │      ▼                                                                │  │
+│  │  Add techniques from adjacent phases to candidates                   │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                         │                                                   │
+│                         ▼                                                   │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │                    TOON CONTEXT ENCODING                              │  │
+│  │                                                                       │  │
+│  │  JSON (~800 tokens) → TOON (~500 tokens)  [~40% reduction]           │  │
+│  │                                                                       │  │
+│  │  CANDIDATE_TECHNIQUES                                                 │  │
+│  │  attack_id, name, tactics, similarity                                 │  │
+│  │  T1110.003, Password Spraying, Credential Access, 0.87               │  │
+│  │  T1078.002, Domain Accounts, Initial Access;Persistence, 0.72        │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                         │                                                   │
+│                         ▼                                                   │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │                    STAGE 1: NODE SELECTION                            │  │
+│  │                                                                       │  │
+│  │  Input: Finding + TOON candidates                                    │  │
+│  │  Task: Select which techniques apply, with evidence                   │  │
+│  │  Output: Selected technique IDs + confidence + evidence              │  │
+│  │                                                                       │  │
+│  │  ┌─────────────────────────────────────────────────────────────────┐ │  │
+│  │  │ LLM (gpt-oss:20b)                                               │ │  │
+│  │  │ "Select techniques from candidates that match the finding"      │ │  │
+│  │  └─────────────────────────────────────────────────────────────────┘ │  │
+│  │                                                                       │  │
+│  │  Validation: Filter hallucinated IDs (only keep IDs from candidates) │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                         │                                                   │
+│                         ▼                                                   │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │              GRAPH ENRICHMENT (SPARQL)                                │  │
+│  │                                                                       │  │
+│  │  For each selected technique:                                        │  │
+│  │  ├── Get mitigations (with inheritance for subtechniques)           │  │
+│  │  ├── Get D3FEND countermeasures (via mitigation mappings)           │  │
+│  │  └── Get detection data sources                                      │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                         │                                                   │
+│                         ▼                                                   │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │                    STAGE 2: REMEDIATION WRITING                       │  │
+│  │                                                                       │  │
+│  │  Input: Finding + Selected techniques + Mitigations + D3FEND         │  │
+│  │  Task: Write product-specific implementation guidance                │  │
+│  │  Output: Prioritized remediations + D3FEND recommendations           │  │
+│  │                                                                       │  │
+│  │  ┌─────────────────────────────────────────────────────────────────┐ │  │
+│  │  │ LLM (gpt-oss:20b)                                               │ │  │
+│  │  │ Context extraction: OS, products, environment from finding      │ │  │
+│  │  │ "Write remediation for the selected techniques"                 │ │  │
+│  │  └─────────────────────────────────────────────────────────────────┘ │  │
+│  │                                                                       │  │
+│  │  Validation: Filter invalid mitigation/D3FEND IDs                    │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                         │                                                   │
+│                         ▼                                                   │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │                       ANALYSIS RESULT                                 │  │
+│  │                                                                       │  │
+│  │  ├── Selected Techniques (with confidence, evidence, tactic)         │  │
+│  │  ├── ATT&CK Mitigations (prioritized, with implementation steps)    │  │
+│  │  ├── D3FEND Recommendations (linked to mitigations)                  │  │
+│  │  ├── Detection Recommendations (data sources, rationale)            │  │
+│  │  └── Kill Chain Analysis (attack lifecycle context)                  │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Kill Chain Phases
+
+The system uses MITRE ATT&CK's 14-phase kill chain for inductive bias:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  1. Reconnaissance     │  5. Persistence         │  9. Discovery            │
+│  2. Resource Dev       │  6. Privilege Esc       │ 10. Lateral Movement     │
+│  3. Initial Access     │  7. Defense Evasion     │ 11. Collection           │
+│  4. Execution          │  8. Credential Access   │ 12. C2 / 13. Exfil / 14. │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Example: If finding mentions "Initial Access", system suggests techniques from
+         Execution and Persistence phases (window=2 forward in kill chain).
+```
+
+### Components
 
 - **Oxigraph** - RDF triplestore (pyoxigraph) for structured SPARQL queries
 - **ChromaDB** - Vector store for semantic similarity search
 - **sentence-transformers** - Local embeddings (nomic-embed-text-v1.5, pinned revision)
+- **BM25** - Keyword-based retrieval using rank-bm25 for exact term matching
+- **Two-Stage LLM** - Separate selection and remediation for reduced hallucination
+- **TOON Encoder** - Token-efficient context format (~40% token reduction)
 
 ## Data
 
@@ -164,7 +363,13 @@ src/
     graph.py       # Oxigraph wrapper (ATT&CK + D3FEND)
     vectors.py     # ChromaDB wrapper
   query/
-    hybrid.py      # Combined graph + vector queries
+    hybrid.py      # Combined graph + vector + BM25 queries with RRF
+    keyword.py     # BM25 keyword search engine
+    semantic.py    # Vector similarity search
   reasoning/
-    analyzer.py    # LLM-based attack analysis
+    analyzer.py    # LLM-based attack analysis orchestrator
+    toon_encoder.py # Token-efficient context encoding
+    stages/
+      selector.py  # Stage 1: Technique selection from candidates
+      remediator.py # Stage 2: Remediation guidance generation
 ```

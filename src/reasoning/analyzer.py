@@ -6,6 +6,13 @@ from typing import Any
 from rich.console import Console
 from rich.panel import Panel
 
+from src.reasoning.toon_encoder import (
+    build_toon_context,
+    techniques_to_toon,
+    mitigations_to_toon,
+    d3fend_to_toon,
+)
+
 console = Console()
 
 
@@ -64,6 +71,15 @@ class DetectionRecommendation:
 
 
 @dataclass
+class ContextConstraints:
+    """Valid IDs from RAG context for constraining LLM output."""
+
+    technique_ids: set[str]
+    mitigation_ids: set[str]
+    d3fend_ids: set[str]
+
+
+@dataclass
 class AnalysisResult:
     """Complete analysis result."""
 
@@ -75,6 +91,7 @@ class AnalysisResult:
     finding_type: str = "attack_narrative"  # "attack_narrative" or "vulnerability"
     kill_chain_analysis: str = ""
     raw_llm_response: dict[str, Any] = field(default_factory=dict)
+    filtered_ids: dict[str, list[str]] = field(default_factory=dict)  # IDs removed by validation
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -125,6 +142,7 @@ class AnalysisResult:
                 for d in self.detection_recommendations
             ],
             "kill_chain_analysis": self.kill_chain_analysis,
+            "filtered_ids": self.filtered_ids,
         }
 
 
@@ -270,12 +288,20 @@ class AttackAnalyzer:
 
     Uses the hybrid query engine to find candidate techniques, then leverages
     an LLM to classify and provide comprehensive remediation including D3FEND.
+
+    Supports two modes:
+    - Single-stage (default): One LLM call for classification + remediation
+    - Two-stage: Separate LLM calls for node selection and remediation writing
     """
 
     def __init__(
         self,
         hybrid_engine,
         llm_backend=None,
+        two_stage: bool = True,
+        use_toon: bool = True,
+        use_bm25: bool = True,
+        use_kill_chain: bool = True,
     ):
         """
         Initialize the analyzer.
@@ -283,12 +309,40 @@ class AttackAnalyzer:
         Args:
             hybrid_engine: HybridQueryEngine instance
             llm_backend: LLM backend to use (defaults to Ollama)
+            two_stage: Use two-stage LLM architecture (default False)
+            use_toon: Use TOON format for context (default False)
+            use_bm25: Use BM25 hybrid retrieval (default True)
+            use_kill_chain: Include kill chain adjacent techniques (default False)
         """
         self.hybrid = hybrid_engine
         if llm_backend is None:
             from src.reasoning.llm import OllamaBackend
             llm_backend = OllamaBackend()
         self.llm = llm_backend
+        self.two_stage = two_stage
+        self.use_toon = use_toon
+        self.use_bm25 = use_bm25
+        self.use_kill_chain = use_kill_chain
+
+        # Lazy-load two-stage components
+        self._selector = None
+        self._remediator = None
+
+    @property
+    def selector(self):
+        """Lazy-load the NodeSelector for Stage 1."""
+        if self._selector is None:
+            from src.reasoning.stages import NodeSelector
+            self._selector = NodeSelector(self.llm)
+        return self._selector
+
+    @property
+    def remediator(self):
+        """Lazy-load the RemediationWriter for Stage 2."""
+        if self._remediator is None:
+            from src.reasoning.stages import RemediationWriter
+            self._remediator = RemediationWriter(self.llm, self.hybrid.graph)
+        return self._remediator
 
     def analyze(self, finding_text: str, top_k: int = 5) -> AnalysisResult:
         """
@@ -302,12 +356,30 @@ class AttackAnalyzer:
             AnalysisResult with techniques, remediation, D3FEND, and detection guidance
         """
         # Step 1: Use hybrid engine to find candidate techniques with full enrichment
-        hybrid_result = self.hybrid.query(finding_text, top_k=top_k, enrich=True)
+        hybrid_result = self.hybrid.query(
+            finding_text,
+            top_k=top_k,
+            enrich=True,
+            use_bm25=self.use_bm25,
+            use_kill_chain=self.use_kill_chain,
+        )
 
-        # Step 2: Build complete context including D3FEND
-        context = self._build_complete_context(hybrid_result.techniques)
+        if self.two_stage:
+            return self._analyze_two_stage(finding_text, hybrid_result)
+        else:
+            return self._analyze_single_stage(finding_text, hybrid_result)
 
-        # Step 3: Single LLM call for classification + remediation
+    def _analyze_single_stage(self, finding_text: str, hybrid_result) -> AnalysisResult:
+        """Single-stage analysis (original implementation)."""
+        from src.logging import log_llm_request
+
+        # Build complete context including D3FEND and get valid ID constraints
+        if self.use_toon:
+            context, constraints = self._build_toon_context(hybrid_result.techniques, hybrid_result)
+        else:
+            context, constraints = self._build_complete_context(hybrid_result.techniques)
+
+        # Single LLM call for classification + remediation
         prompt = f"""Security Finding:
 {finding_text}
 
@@ -319,9 +391,13 @@ Analyze this finding and provide:
 3. D3FEND defensive techniques with actionable guidance
 4. Detection recommendations based on available data sources"""
 
-        result = self.llm.generate_json(prompt, system=ANALYSIS_SYSTEM_PROMPT)
+        log_llm_request(prompt, system=ANALYSIS_SYSTEM_PROMPT, model="single-stage")
+        raw_result = self.llm.generate_json(prompt, system=ANALYSIS_SYSTEM_PROMPT)
 
-        # Step 4: Build response with group enrichment
+        # Validate and filter LLM response to only include IDs from RAG context
+        result, filtered_ids = self._validate_llm_response(raw_result, constraints)
+
+        # Build response with group enrichment
         techniques = self._enrich_with_groups(result, hybrid_result.techniques)
 
         # Build remediations and merge D3FEND into them
@@ -347,16 +423,273 @@ Analyze this finding and provide:
             detection_recommendations=detection_recs,
             finding_type=result.get("finding_type", "attack_narrative"),
             kill_chain_analysis=result.get("kill_chain_analysis", ""),
-            raw_llm_response=result,
+            raw_llm_response=raw_result,
+            filtered_ids=filtered_ids,
         )
 
-    def _build_complete_context(self, techniques) -> str:
-        """Build complete context with techniques, mitigations, and D3FEND."""
+    def _analyze_two_stage(self, finding_text: str, hybrid_result) -> AnalysisResult:
+        """Two-stage analysis with separate selection and remediation."""
+        # Build constraints from retrieved techniques
+        valid_technique_ids: set[str] = set()
+        valid_mitigation_ids: set[str] = set()
+        valid_d3fend_ids: set[str] = set()
+
+        mitigations_by_id: dict[str, dict] = {}
+        d3fend_by_id: dict[str, dict] = {}
+
+        for tech in hybrid_result.techniques:
+            valid_technique_ids.add(tech.attack_id)
+
+            for mit in tech.mitigations:
+                mit_id = mit["attack_id"]
+                valid_mitigation_ids.add(mit_id)
+                if mit_id not in mitigations_by_id:
+                    mitigations_by_id[mit_id] = {**mit, "addresses": [tech.attack_id]}
+                else:
+                    if tech.attack_id not in mitigations_by_id[mit_id]["addresses"]:
+                        mitigations_by_id[mit_id]["addresses"].append(tech.attack_id)
+
+            # Collect D3FEND techniques
+            d3fend_techniques = self.hybrid.graph.get_d3fend_for_technique(tech.attack_id)
+            for d3f in d3fend_techniques:
+                d3f_id = d3f["d3fend_id"]
+                valid_d3fend_ids.add(d3f_id)
+                if d3f_id not in d3fend_by_id:
+                    d3fend_by_id[d3f_id] = {
+                        **d3f,
+                        "addresses": [tech.attack_id],
+                        "via_mitigations": [d3f.get("via_mitigation", "")],
+                    }
+                else:
+                    if tech.attack_id not in d3fend_by_id[d3f_id]["addresses"]:
+                        d3fend_by_id[d3f_id]["addresses"].append(tech.attack_id)
+
+        # ===== STAGE 1: Node Selection =====
+        console.print("[dim]Stage 1: Selecting relevant techniques...[/dim]")
+
+        # Build TOON context for Stage 1 (techniques only, no mitigations/D3FEND yet)
+        candidates_toon = techniques_to_toon(hybrid_result.techniques, include_description=True)
+
+        # Add kill chain context if available
+        if hybrid_result.kill_chain_context:
+            candidates_toon += f"\n\nKILL CHAIN CONTEXT\n{hybrid_result.kill_chain_context}"
+
+        selection = self.selector.select(finding_text, candidates_toon, valid_technique_ids)
+
+        if not selection.selected_techniques:
+            console.print("[yellow]Stage 1: No techniques selected[/yellow]")
+            return AnalysisResult(
+                finding=finding_text,
+                techniques=[],
+                remediations=[],
+                finding_type=selection.finding_type,
+                kill_chain_analysis=selection.kill_chain_analysis,
+            )
+
+        selected_ids = selection.get_technique_ids()
+        console.print(f"[green]Stage 1: Selected {len(selected_ids)} techniques: {', '.join(selected_ids)}[/green]")
+
+        # ===== STAGE 2: Remediation Writing =====
+        console.print("[dim]Stage 2: Writing remediation guidance...[/dim]")
+
+        # Filter mitigations to only those relevant to selected techniques
+        filtered_mitigations = []
+        for mit_id, mit in mitigations_by_id.items():
+            relevant_addresses = [t for t in mit["addresses"] if t in selected_ids]
+            if relevant_addresses:
+                filtered_mitigations.append({**mit, "addresses": relevant_addresses})
+
+        # Filter D3FEND to only those relevant to selected techniques
+        filtered_d3fend = []
+        for d3f_id, d3f in d3fend_by_id.items():
+            relevant_addresses = [t for t in d3f["addresses"] if t in selected_ids]
+            if relevant_addresses:
+                filtered_d3fend.append({**d3f, "addresses": relevant_addresses})
+
+        # Build TOON context for Stage 2
+        mitigations_toon = mitigations_to_toon(filtered_mitigations)
+        d3fend_toon = d3fend_to_toon(filtered_d3fend)
+
+        remediation_result = self.remediator.write(
+            finding_text,
+            selected_ids,
+            mitigations_toon,
+            d3fend_toon,
+            valid_mitigation_ids,
+            valid_d3fend_ids,
+        )
+
+        # Build techniques list from Stage 1 selection
+        tech_lookup = {t.attack_id: t for t in hybrid_result.techniques}
+        techniques = []
+        for sel_tech in selection.selected_techniques:
+            enriched = tech_lookup.get(sel_tech.attack_id)
+            groups = enriched.groups[:5] if enriched and enriched.groups else []
+
+            techniques.append(TechniqueMatch(
+                attack_id=sel_tech.attack_id,
+                name=enriched.name if enriched else "",
+                confidence=sel_tech.confidence,
+                evidence=sel_tech.evidence,
+                tactics=[sel_tech.tactic] if sel_tech.tactic else [],
+                groups=groups,
+            ))
+
+        # Convert Stage 2 results to analyzer result format
+        remediations = []
+        for rem in remediation_result.remediations:
+            remediations.append(RemediationItem(
+                mitigation_id=rem.mitigation_id,
+                name=rem.name,
+                priority=rem.priority,
+                addresses=rem.addresses,
+                implementation=rem.implementation,
+                d3fend_techniques=[],  # Will be populated below
+            ))
+
+        # Merge D3FEND into mitigations
+        defend_recommendations = []
+        for d3f in remediation_result.defend_recommendations:
+            # Check if this D3FEND maps to a mitigation in our results
+            matched = False
+            for rem in remediations:
+                if rem.mitigation_id in d3f.via_mitigations:
+                    rem.d3fend_techniques.append(DefendTechnique(
+                        d3fend_id=d3f.d3fend_id,
+                        name=d3f.name,
+                        implementation=d3f.implementation,
+                    ))
+                    matched = True
+                    break
+
+            if not matched:
+                defend_recommendations.append(DefendRecommendation(
+                    d3fend_id=d3f.d3fend_id,
+                    name=d3f.name,
+                    priority=d3f.priority,
+                    addresses=d3f.addresses,
+                    implementation=d3f.implementation,
+                    via_mitigations=d3f.via_mitigations,
+                ))
+
+        detection_recs = [
+            DetectionRecommendation(
+                data_source=d.data_source,
+                rationale=d.rationale,
+                techniques_covered=d.techniques_covered,
+            )
+            for d in remediation_result.detection_recommendations
+        ]
+
+        return AnalysisResult(
+            finding=finding_text,
+            techniques=techniques,
+            remediations=remediations,
+            defend_recommendations=defend_recommendations,
+            detection_recommendations=detection_recs,
+            finding_type=selection.finding_type,
+            kill_chain_analysis=selection.kill_chain_analysis,
+            raw_llm_response={
+                "stage1": selection.raw_response,
+                "stage2": remediation_result.raw_response,
+            },
+        )
+
+    def _build_toon_context(self, techniques, hybrid_result=None) -> tuple[str, ContextConstraints]:
+        """Build TOON-formatted context for LLM.
+
+        Returns:
+            Tuple of (toon_context_string, ContextConstraints with valid IDs)
+        """
+        from src.reasoning.toon_encoder import (
+            build_toon_context,
+            estimate_token_savings,
+        )
+
+        # Track valid IDs for constraining LLM output
+        valid_technique_ids: set[str] = set()
+        valid_mitigation_ids: set[str] = set()
+        valid_d3fend_ids: set[str] = set()
+
+        # Collect mitigations
+        mitigations_list = []
+        mitigations_by_id: dict[str, dict] = {}
+        for tech in techniques:
+            valid_technique_ids.add(tech.attack_id)
+            for mit in tech.mitigations:
+                mit_id = mit["attack_id"]
+                valid_mitigation_ids.add(mit_id)
+                if mit_id not in mitigations_by_id:
+                    mitigations_by_id[mit_id] = {**mit, "addresses": [tech.attack_id]}
+                else:
+                    if tech.attack_id not in mitigations_by_id[mit_id]["addresses"]:
+                        mitigations_by_id[mit_id]["addresses"].append(tech.attack_id)
+
+        mitigations_list = list(mitigations_by_id.values())
+
+        # Collect D3FEND techniques
+        d3fend_list = []
+        d3fend_by_id: dict[str, dict] = {}
+        for tech in techniques:
+            d3fend_techniques = self.hybrid.graph.get_d3fend_for_technique(tech.attack_id)
+            for d3f in d3fend_techniques:
+                d3f_id = d3f["d3fend_id"]
+                valid_d3fend_ids.add(d3f_id)
+                if d3f_id not in d3fend_by_id:
+                    d3fend_by_id[d3f_id] = {
+                        **d3f,
+                        "addresses": [tech.attack_id],
+                        "via_mitigations": [d3f.get("via_mitigation", "")],
+                    }
+                else:
+                    if tech.attack_id not in d3fend_by_id[d3f_id]["addresses"]:
+                        d3fend_by_id[d3f_id]["addresses"].append(tech.attack_id)
+
+        d3fend_list = list(d3fend_by_id.values())
+
+        # Get adjacent techniques if available
+        adjacent_techniques = []
+        kill_chain_context = ""
+        if hybrid_result:
+            adjacent_techniques = hybrid_result.adjacent_techniques
+            kill_chain_context = hybrid_result.kill_chain_context
+
+        # Build TOON context
+        toon_context = build_toon_context(
+            techniques=techniques,
+            mitigations=mitigations_list,
+            d3fend_techniques=d3fend_list,
+            include_description=True,
+            include_data_sources=True,
+            adjacent_techniques=adjacent_techniques,
+            kill_chain_context=kill_chain_context,
+        )
+
+        constraints = ContextConstraints(
+            technique_ids=valid_technique_ids,
+            mitigation_ids=valid_mitigation_ids,
+            d3fend_ids=valid_d3fend_ids,
+        )
+
+        return toon_context, constraints
+
+    def _build_complete_context(self, techniques) -> tuple[str, ContextConstraints]:
+        """Build complete context with techniques, mitigations, and D3FEND.
+
+        Returns:
+            Tuple of (context_string, ContextConstraints with valid IDs)
+        """
         sections = []
+
+        # Track valid IDs for constraining LLM output
+        valid_technique_ids: set[str] = set()
+        valid_mitigation_ids: set[str] = set()
+        valid_d3fend_ids: set[str] = set()
 
         # Section 1: Candidate techniques
         sections.append("CANDIDATE ATT&CK TECHNIQUES:")
         for tech in techniques:
+            valid_technique_ids.add(tech.attack_id)
             desc = tech.description[:400] + "..." if len(tech.description) > 400 else tech.description
 
             parts = [
@@ -398,6 +731,7 @@ Analyze this finding and provide:
 
         if mitigations_by_id:
             for mit_id, mit in mitigations_by_id.items():
+                valid_mitigation_ids.add(mit_id)
                 inherited = " [inherited]" if mit.get("inherited") else ""
                 sections.append(
                     f"  {mit_id} ({mit['name']}){inherited} - addresses: {', '.join(mit['addresses'])}"
@@ -426,6 +760,7 @@ Analyze this finding and provide:
 
         if d3fend_by_id:
             for d3f_id, d3f in d3fend_by_id.items():
+                valid_d3fend_ids.add(d3f_id)
                 definition = d3f.get("definition", "")
                 if len(definition) > 150:
                     definition = definition[:150] + "..."
@@ -438,7 +773,119 @@ Analyze this finding and provide:
         else:
             sections.append("  No D3FEND techniques found (D3FEND may not be loaded).")
 
-        return "\n".join(sections)
+        constraints = ContextConstraints(
+            technique_ids=valid_technique_ids,
+            mitigation_ids=valid_mitigation_ids,
+            d3fend_ids=valid_d3fend_ids,
+        )
+
+        return "\n".join(sections), constraints
+
+    def _validate_llm_response(
+        self,
+        llm_result: dict[str, Any],
+        constraints: ContextConstraints,
+    ) -> tuple[dict[str, Any], dict[str, list[str]]]:
+        """Validate and filter LLM response to only include IDs from RAG context.
+
+        Args:
+            llm_result: Raw LLM JSON response
+            constraints: Valid IDs from context
+
+        Returns:
+            Tuple of (filtered_result, filtered_ids_by_type)
+        """
+        filtered_ids: dict[str, list[str]] = {
+            "techniques": [],
+            "mitigations": [],
+            "d3fend": [],
+        }
+
+        result = llm_result.copy()
+
+        # Filter techniques to only those in context
+        if "techniques" in result:
+            valid_techniques = []
+            for t in result["techniques"]:
+                attack_id = t.get("attack_id", "")
+                if attack_id in constraints.technique_ids:
+                    valid_techniques.append(t)
+                else:
+                    filtered_ids["techniques"].append(attack_id)
+                    console.print(
+                        f"[yellow]Filtered hallucinated technique: {attack_id}[/yellow]"
+                    )
+            result["techniques"] = valid_techniques
+
+        # Get the set of technique IDs the LLM actually identified (post-filtering)
+        identified_technique_ids = {
+            t.get("attack_id", "") for t in result.get("techniques", [])
+        }
+
+        # Filter remediations to only valid mitigation IDs
+        if "remediations" in result:
+            valid_remediations = []
+            for r in result["remediations"]:
+                mit_id = r.get("mitigation_id", "")
+                if mit_id in constraints.mitigation_ids:
+                    # Also filter the "addresses" field to only identified techniques
+                    r["addresses"] = [
+                        tid for tid in r.get("addresses", [])
+                        if tid in identified_technique_ids
+                    ]
+                    if r["addresses"]:  # Only keep if it addresses at least one technique
+                        valid_remediations.append(r)
+                    else:
+                        filtered_ids["mitigations"].append(mit_id)
+                        console.print(
+                            f"[yellow]Filtered mitigation with no valid addresses: {mit_id}[/yellow]"
+                        )
+                else:
+                    filtered_ids["mitigations"].append(mit_id)
+                    console.print(
+                        f"[yellow]Filtered hallucinated mitigation: {mit_id}[/yellow]"
+                    )
+            result["remediations"] = valid_remediations
+
+        # Filter D3FEND recommendations to only valid IDs
+        if "defend_recommendations" in result:
+            valid_d3fend = []
+            for d in result["defend_recommendations"]:
+                d3f_id = d.get("d3fend_id", "")
+                if d3f_id in constraints.d3fend_ids:
+                    # Filter "addresses" to only identified techniques
+                    d["addresses"] = [
+                        tid for tid in d.get("addresses", [])
+                        if tid in identified_technique_ids
+                    ]
+                    # Filter "via_mitigations" to only valid mitigations
+                    d["via_mitigations"] = [
+                        mid for mid in d.get("via_mitigations", [])
+                        if mid in constraints.mitigation_ids
+                    ]
+                    if d["addresses"]:  # Only keep if it addresses at least one technique
+                        valid_d3fend.append(d)
+                    else:
+                        filtered_ids["d3fend"].append(d3f_id)
+                        console.print(
+                            f"[yellow]Filtered D3FEND with no valid addresses: {d3f_id}[/yellow]"
+                        )
+                else:
+                    filtered_ids["d3fend"].append(d3f_id)
+                    console.print(
+                        f"[yellow]Filtered hallucinated D3FEND: {d3f_id}[/yellow]"
+                    )
+            result["defend_recommendations"] = valid_d3fend
+
+        # Filter detection recommendations' technique references
+        if "detection_recommendations" in result:
+            for det in result["detection_recommendations"]:
+                det["techniques_covered"] = [
+                    tid for tid in det.get("techniques_covered", [])
+                    if tid in identified_technique_ids
+                ]
+
+        return result, filtered_ids
 
     def _enrich_with_groups(
         self, llm_result: dict[str, Any], techniques
@@ -671,3 +1118,16 @@ def print_analysis_result(result: AnalysisResult) -> None:
         if total_d3fend > 0:
             summary_parts.append(f"{total_d3fend} D3FEND techniques")
         console.print(f"[dim]Summary: {', '.join(summary_parts)}[/dim]")
+
+    # Show filtered IDs if any
+    if result.filtered_ids:
+        total_filtered = sum(len(ids) for ids in result.filtered_ids.values())
+        if total_filtered > 0:
+            console.print()
+            console.print("[dim yellow]Filtered hallucinated IDs (not in RAG context):[/dim yellow]")
+            if result.filtered_ids.get("techniques"):
+                console.print(f"  [dim]Techniques: {', '.join(result.filtered_ids['techniques'])}[/dim]")
+            if result.filtered_ids.get("mitigations"):
+                console.print(f"  [dim]Mitigations: {', '.join(result.filtered_ids['mitigations'])}[/dim]")
+            if result.filtered_ids.get("d3fend"):
+                console.print(f"  [dim]D3FEND: {', '.join(result.filtered_ids['d3fend'])}[/dim]")

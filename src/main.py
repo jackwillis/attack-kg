@@ -343,12 +343,40 @@ def search(
     top_k: int = typer.Option(5, "-k", help="Number of results"),
     tactic: Optional[str] = typer.Option(None, help="Filter by tactic"),
     vector_dir: Path = typer.Option(DEFAULT_VECTOR_DIR, help="ChromaDB store directory"),
+    graph_dir: Path = typer.Option(DEFAULT_GRAPH_DIR, help="Oxigraph store directory"),
+    hybrid: bool = typer.Option(False, "--hybrid", help="Use hybrid BM25+semantic retrieval"),
 ):
-    """Semantic search for techniques matching a description."""
-    from src.store.vectors import SemanticSearch
+    """Semantic search for techniques matching a description.
 
-    searcher = SemanticSearch(vector_dir)
-    searcher.print_search_results(query_text, n_results=top_k, tactic=tactic)
+    Examples:
+        attack-kg search "credential theft"
+        attack-kg search "certutil download" --hybrid
+        attack-kg search "T1059.001" --hybrid
+    """
+    if hybrid:
+        from src.query.hybrid import HybridQueryEngine
+        from rich.table import Table
+
+        engine = HybridQueryEngine(graph_dir, vector_dir, enable_bm25=True)
+        result = engine.query(query_text, top_k=top_k, enrich=False, use_bm25=True)
+
+        table = Table(title=f"Hybrid Search Results for: {query_text}")
+        table.add_column("ID", style="cyan")
+        table.add_column("Name", style="white")
+        table.add_column("Tactics", style="dim")
+        table.add_column("Score", style="green")
+
+        for tech in result.techniques:
+            tactics = ", ".join(tech.tactics[:2]) if tech.tactics else ""
+            table.add_row(tech.attack_id, tech.name, tactics, f"{tech.similarity:.3f}")
+
+        console.print(table)
+        console.print(f"\n[dim]Retrieval mode: {result.metadata.get('retrieval_mode', 'unknown')}[/dim]")
+    else:
+        from src.store.vectors import SemanticSearch
+
+        searcher = SemanticSearch(vector_dir)
+        searcher.print_search_results(query_text, n_results=top_k, tactic=tactic)
 
 
 @app.command()
@@ -361,13 +389,18 @@ def analyze(
     graph_dir: Path = typer.Option(DEFAULT_GRAPH_DIR, help="Oxigraph store directory"),
     vector_dir: Path = typer.Option(DEFAULT_VECTOR_DIR, help="ChromaDB store directory"),
     output_json: bool = typer.Option(False, "--json", help="Output as JSON"),
+    two_stage: bool = typer.Option(True, "--two-stage/--single-stage", help="Use two-stage LLM (separate selection and remediation)"),
+    toon: bool = typer.Option(True, "--toon/--no-toon", help="Use TOON format for reduced token usage"),
+    hybrid: bool = typer.Option(True, "--hybrid/--no-hybrid", help="Use hybrid BM25+semantic retrieval"),
+    kill_chain: bool = typer.Option(True, "--kill-chain/--no-kill-chain", help="Include kill chain adjacent techniques"),
 ):
     """Analyze an attack narrative to identify ATT&CK techniques and suggest remediation.
 
     Examples:
         attack-kg analyze "Found valid credentials through password spraying against Azure AD"
         attack-kg analyze --file finding.txt
-        attack-kg analyze --backend openai "Attacker used mimikatz to dump credentials"
+        attack-kg analyze --single-stage "Simple finding without two-stage"
+        attack-kg analyze --no-kill-chain "Finding without kill chain expansion"
     """
     import json
     from src.query.hybrid import HybridQueryEngine
@@ -391,7 +424,18 @@ def analyze(
         raise typer.Exit(1)
 
     # Initialize components
-    console.print("[dim]Initializing knowledge graph and LLM...[/dim]")
+    mode_info = []
+    if two_stage:
+        mode_info.append("two-stage")
+    if toon:
+        mode_info.append("TOON")
+    if hybrid:
+        mode_info.append("hybrid-retrieval")
+    if kill_chain:
+        mode_info.append("kill-chain")
+
+    mode_str = ", ".join(mode_info) if mode_info else "default"
+    console.print(f"[dim]Initializing knowledge graph and LLM (mode: {mode_str})...[/dim]")
 
     try:
         llm = get_llm_backend(backend=backend, model=model)
@@ -403,8 +447,15 @@ def analyze(
             console.print("[dim]Make sure OPENAI_API_KEY is set[/dim]")
         raise typer.Exit(1)
 
-    hybrid = HybridQueryEngine(graph_dir, vector_dir)
-    analyzer = AttackAnalyzer(hybrid, llm)
+    hybrid_engine = HybridQueryEngine(graph_dir, vector_dir, enable_bm25=hybrid)
+    analyzer = AttackAnalyzer(
+        hybrid_engine,
+        llm,
+        two_stage=two_stage,
+        use_toon=toon,
+        use_bm25=hybrid,
+        use_kill_chain=kill_chain,
+    )
 
     # Run analysis
     console.print("[dim]Analyzing finding...[/dim]\n")
@@ -422,12 +473,121 @@ def analyze(
         print_analysis_result(result)
 
 
+@app.command("list-testcases")
+def list_testcases():
+    """List available benchmark test cases."""
+    from src.benchmark import load_test_suite, DEFAULT_TEST_SUITE
+
+    console.print("\n[bold]Available Benchmark Test Cases[/bold]")
+    console.print("━" * 60)
+
+    for tc in DEFAULT_TEST_SUITE:
+        console.print(f"\n[cyan]{tc.id}[/cyan]: {tc.name}")
+        console.print(f"  [dim]{tc.description}[/dim]")
+        console.print(f"  Platform: {tc.context.platform}")
+        console.print(f"  Products: {', '.join(tc.context.products[:3])}")
+        console.print(f"  Expected techniques: {len(tc.expected_techniques)}")
+        console.print(f"  Expected mitigations: {len(tc.expected_mitigations)}")
+        console.print(f"  Tags: {', '.join(tc.tags)}")
+
+    console.print(f"\n[dim]Total: {len(DEFAULT_TEST_SUITE)} test cases[/dim]")
+
+
+@app.command()
+def benchmark(
+    models: str = typer.Argument(..., help="Comma-separated list of models to test (e.g., gpt-oss:20b,gemma3:4b)"),
+    backend: str = typer.Option("ollama", "--backend", "-b", help="LLM backend: ollama or openai"),
+    test_suite: str = typer.Option("default", "--suite", "-s", help="Test suite name"),
+    output_dir: Optional[Path] = typer.Option(None, "--output", "-o", help="Output directory for results"),
+    top_k: int = typer.Option(5, "-k", help="Number of candidate techniques"),
+    graph_dir: Path = typer.Option(DEFAULT_GRAPH_DIR, help="Oxigraph store directory"),
+    vector_dir: Path = typer.Option(DEFAULT_VECTOR_DIR, help="ChromaDB store directory"),
+    markdown: bool = typer.Option(False, "--markdown", "-md", help="Generate markdown report"),
+    two_stage: bool = typer.Option(True, "--two-stage/--single-stage", help="Use two-stage LLM architecture"),
+    toon: bool = typer.Option(True, "--toon/--no-toon", help="Use TOON format for reduced token usage"),
+    hybrid: bool = typer.Option(True, "--hybrid/--no-hybrid", help="Use hybrid BM25+semantic retrieval"),
+    kill_chain: bool = typer.Option(True, "--kill-chain/--no-kill-chain", help="Include kill chain analysis"),
+):
+    """Run benchmark tests against LLM models for ATT&CK analysis.
+
+    Evaluates models on technique identification, remediation quality, context
+    awareness, and speed. Uses automated scoring based on ground truth test cases.
+
+    Examples:
+        attack-kg benchmark gpt-oss:20b,gemma3:4b
+        attack-kg benchmark gpt-oss:20b --output results/
+        attack-kg benchmark gpt-oss:20b,granite4:3b --markdown
+        attack-kg benchmark gpt-oss:20b --two-stage --toon
+    """
+    from src.store.graph import AttackGraph
+    from src.query.hybrid import HybridQueryEngine
+    from src.benchmark import (
+        BenchmarkRunner,
+        BenchmarkConfig,
+        print_results,
+        generate_markdown_report,
+        generate_detailed_report,
+    )
+
+    # Parse models
+    model_list = [m.strip() for m in models.split(",") if m.strip()]
+    if not model_list:
+        console.print("[red]Error:[/red] No models specified")
+        raise typer.Exit(1)
+
+    console.print(f"[bold]ATT&CK Model Benchmark[/bold]")
+    console.print(f"[dim]Models: {', '.join(model_list)}[/dim]")
+    console.print(f"[dim]Backend: {backend}[/dim]")
+
+    # Initialize components
+    console.print("\n[dim]Loading knowledge graph...[/dim]")
+    graph = AttackGraph(graph_dir)
+    graph.load()
+
+    from src.query.semantic import SemanticSearchEngine
+    semantic = SemanticSearchEngine(vector_dir)
+    hybrid_engine = HybridQueryEngine(graph=graph, semantic=semantic, enable_bm25=hybrid)
+
+    # Create config
+    config = BenchmarkConfig(
+        models=model_list,
+        test_suite=test_suite,
+        backend=backend,
+        top_k=top_k,
+        output_dir=output_dir,
+        save_raw_outputs=output_dir is not None,
+        two_stage=two_stage,
+        use_toon=toon,
+        use_bm25=hybrid,
+        use_kill_chain=kill_chain,
+    )
+
+    # Run benchmark
+    runner = BenchmarkRunner(hybrid_engine=hybrid_engine, graph=graph)
+    result = runner.run(config)
+
+    # Print results
+    print_results(result)
+
+    # Generate reports if requested
+    if markdown:
+        report_path = (output_dir or Path(".")) / "benchmark_report.md"
+        generate_detailed_report(result, report_path)
+
+    if output_dir:
+        console.print(f"\n[dim]Full results saved to {output_dir}[/dim]")
+
+
 @app.command()
 def repl(
     graph_dir: Path = typer.Option(DEFAULT_GRAPH_DIR, help="Oxigraph store directory"),
     vector_dir: Path = typer.Option(DEFAULT_VECTOR_DIR, help="ChromaDB store directory"),
     backend: str = typer.Option("ollama", "--backend", "-b", help="LLM backend: ollama or openai"),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name override"),
+    two_stage: bool = typer.Option(True, "--two-stage/--single-stage", help="Use two-stage LLM for analyze"),
+    toon: bool = typer.Option(True, "--toon/--no-toon", help="Use TOON format for reduced token usage"),
+    hybrid: bool = typer.Option(True, "--hybrid/--no-hybrid", help="Use hybrid BM25+semantic retrieval"),
+    kill_chain: bool = typer.Option(True, "--kill-chain/--no-kill-chain", help="Include kill chain analysis"),
 ):
     """Start an interactive graph browser session."""
     import atexit
@@ -468,8 +628,8 @@ def repl(
     # Initialize components
     graph = AttackGraph(graph_dir)
     semantic = SemanticSearchEngine(vector_dir)
-    hybrid = HybridQueryEngine(graph=graph, semantic=semantic)
-    browser = GraphBrowser(graph, hybrid)
+    hybrid_engine = HybridQueryEngine(graph=graph, semantic=semantic, enable_bm25=hybrid)
+    browser = GraphBrowser(graph, hybrid_engine)
 
     # Lazy-loaded LLM for ask command
     _llm = None
@@ -497,7 +657,14 @@ def repl(
             from src.reasoning.analyzer import AttackAnalyzer
             llm = get_llm()
             if llm:
-                _analyzer = AttackAnalyzer(hybrid, llm)
+                _analyzer = AttackAnalyzer(
+                    hybrid_engine,
+                    llm,
+                    two_stage=two_stage,
+                    use_toon=toon,
+                    use_bm25=hybrid,
+                    use_kill_chain=kill_chain,
+                )
         return _analyzer
 
     def show_help():

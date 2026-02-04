@@ -182,13 +182,14 @@ class AttackGraph:
 
     def get_techniques_for_tactic(self, tactic: str) -> list[dict[str, str]]:
         """Get all techniques for a given tactic."""
+        tactic_uri = f"<https://attack.mitre.org/tactic/{tactic}>"
         sparql = f"""
         PREFIX attack: <https://attack.mitre.org/>
         PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 
         SELECT ?attackId ?name WHERE {{
             ?technique a attack:Technique ;
-                       attack:tactic attack:tactic/{tactic} ;
+                       attack:tactic {tactic_uri} ;
                        attack:attackId ?attackId ;
                        rdfs:label ?name .
         }}
@@ -858,6 +859,7 @@ class AttackGraph:
 
     def get_techniques_by_tactic_with_details(self, tactic: str) -> list[dict[str, Any]]:
         """Get all techniques for a tactic with full details."""
+        tactic_uri = f"<https://attack.mitre.org/tactic/{tactic}>"
         sparql = f"""
         PREFIX attack: <https://attack.mitre.org/>
         PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
@@ -866,7 +868,7 @@ class AttackGraph:
                (GROUP_CONCAT(DISTINCT ?platform; separator=",") AS ?platforms)
         WHERE {{
             ?technique a attack:Technique ;
-                       attack:tactic attack:tactic/{tactic} ;
+                       attack:tactic {tactic_uri} ;
                        attack:attackId ?attackId ;
                        rdfs:label ?name .
             OPTIONAL {{ ?technique attack:description ?description }}

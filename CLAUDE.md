@@ -17,12 +17,18 @@ uv run attack-kg build       # Load into Oxigraph + build ChromaDB vectors
 uv run attack-kg technique T1110.003    # Lookup technique
 uv run attack-kg group APT29            # Group techniques
 uv run attack-kg search "credential theft"  # Semantic search
-uv run attack-kg analyze "password spraying against Azure AD"  # Full analysis with remediation
+uv run attack-kg search "certutil download" --hybrid  # Hybrid BM25+semantic search
+uv run attack-kg analyze "password spraying against Azure AD"  # Full analysis (two-stage, TOON, hybrid, kill-chain all default on)
 uv run attack-kg analyze --file finding.txt  # Analyze from file
+uv run attack-kg analyze --single-stage "finding"  # Disable two-stage (single LLM call)
+uv run attack-kg analyze --no-toon "finding"  # Use JSON format instead of TOON
+uv run attack-kg analyze --no-hybrid "finding"  # Semantic-only retrieval
+uv run attack-kg analyze --no-kill-chain "finding"  # Disable kill chain expansion
 uv run attack-kg countermeasures T1110.003  # Get D3FEND countermeasures for technique
 uv run attack-kg query "SELECT ..."     # Raw SPARQL
-uv run attack-kg repl                   # Interactive mode (default: gpt-oss:20b)
+uv run attack-kg repl                   # Interactive mode (all features enabled by default)
 uv run attack-kg repl --model gemma3:4b # REPL with alternate model
+uv run attack-kg repl --single-stage    # REPL with legacy single-stage analysis
 
 # Graph Browser REPL commands (supports readline history + tab completion)
 # Navigation:
@@ -45,6 +51,14 @@ uv run attack-kg repl --model gemma3:4b # REPL with alternate model
 #   sparql <query>   - Execute raw SPARQL query
 #   tech <id>        - Quick technique lookup (navigates + shows info)
 #   group <name>     - Quick group lookup (navigates + shows connections)
+
+# Benchmarking
+uv run attack-kg list-testcases                    # List available test cases
+uv run attack-kg benchmark gpt-oss:20b             # Single model benchmark
+uv run attack-kg benchmark gpt-oss:20b,gemma3:4b   # Multi-model comparison
+uv run attack-kg benchmark gpt-oss:20b -o results/ # Save detailed results
+uv run attack-kg benchmark gpt-oss:20b --markdown  # Generate markdown report
+uv run attack-kg benchmark gpt-oss:20b --single-stage  # Benchmark with legacy single-stage mode
 
 # Environment variables
 # OLLAMA_HOST       - Ollama server URL (default: http://localhost:11434)
@@ -82,9 +96,25 @@ STIX JSON → StixToRdfConverter → N-Triples → Oxigraph (SPARQL)
 
 - **`src/ingest/embeddings.py`** - Generates embeddings with sentence-transformers (nomic-embed-text-v1.5, 8K token context), stores in ChromaDB.
 
-- **`src/query/hybrid.py`** - `HybridQueryEngine` combines semantic search results with SPARQL graph enrichment.
+- **`src/query/hybrid.py`** - `HybridQueryEngine` combines semantic search and BM25 keyword search using Reciprocal Rank Fusion (RRF), with SPARQL graph enrichment.
+
+- **`src/query/keyword.py`** - `KeywordSearchEngine` provides BM25-based keyword search for exact term matching (technique IDs, tool names, technical terms).
 
 - **`src/ingest/d3fend.py`** - Downloads MITRE D3FEND ontology (TTL format) for defensive technique mapping.
+
+- **`src/benchmark/`** - Automated model benchmarking harness:
+  - `testcases.py` - Test case definitions with ground truth techniques/mitigations
+  - `scorer.py` - Automated scoring (JSON compliance, technique accuracy, remediation quality, context awareness, speed)
+  - `runner.py` - Benchmark execution engine
+  - `reporter.py` - Rich console and markdown report generation
+
+- **`src/reasoning/analyzer.py`** - `AttackAnalyzer` orchestrates the analysis pipeline, supporting both single-stage and two-stage LLM modes.
+
+- **`src/reasoning/toon_encoder.py`** - TOON (Token-Oriented Object Notation) format encoder for 30-60% token reduction in LLM context.
+
+- **`src/reasoning/stages/`** - Two-stage LLM architecture:
+  - `selector.py` - `NodeSelector` (Stage 1) selects relevant techniques from candidates
+  - `remediator.py` - `RemediationWriter` (Stage 2) writes detailed remediation guidance
 
 ### Supported Entity Types
 
@@ -103,7 +133,7 @@ The system processes these STIX entity types into the RDF graph:
 ### HybridQueryEngine Methods
 
 **Core Query Methods:**
-- `query(question, top_k, enrich)` - Semantic search with SPARQL enrichment
+- `query(question, top_k, enrich, use_bm25, use_kill_chain)` - Hybrid search with optional BM25 and kill chain expansion
 - `find_defenses_for_finding(finding_text)` - Get techniques and mitigations for a finding
 - `get_threat_context(technique_id)` - Full context for a technique
 - `compare_groups(group1_id, group2_id)` - Compare two threat groups
@@ -159,3 +189,115 @@ sparql = f"{tech_uri} ..."
 - `get_d3fend_technique(d3fend_id)` - Get D3FEND technique details (e.g., D3-MFA)
 - `get_d3fend_for_mitigation(mitigation_id)` - Get D3FEND techniques for an ATT&CK mitigation
 - `get_d3fend_for_technique(attack_id)` - Get all D3FEND countermeasures for a technique (via mitigations)
+
+## Analysis Pipeline Architecture
+
+### Retrieval Options
+
+**Hybrid Retrieval (BM25 + Embeddings)**: Combines keyword search with semantic search using Reciprocal Rank Fusion (RRF).
+- BM25 catches exact matches: technique IDs, tool names, technical terms
+- Semantic search finds conceptually similar techniques
+- RRF formula: `score(d) = sum(1 / (k + rank(d)))` where k=60
+
+**Kill Chain Inductive Bias**: When enabled, adds techniques from adjacent kill chain phases:
+```
+Reconnaissance → Resource Development → Initial Access → Execution →
+Persistence → Privilege Escalation → Defense Evasion → Credential Access →
+Discovery → Lateral Movement → Collection → C2 → Exfiltration → Impact
+```
+
+### Analysis Pipeline Diagram
+
+```
+┌─────────────┐
+│   Finding   │
+└──────┬──────┘
+       │
+       ▼
+┌──────────────────────────────────────────┐
+│         HYBRID RETRIEVAL (RRF)           │
+│  ┌─────────────┐    ┌─────────────┐      │
+│  │  Semantic   │    │    BM25     │      │
+│  │  (ChromaDB) │    │  (Keyword)  │      │
+│  └──────┬──────┘    └──────┬──────┘      │
+│         └────────┬─────────┘             │
+│                  ▼                       │
+│         Reciprocal Rank Fusion           │
+└──────────────────────────────────────────┘
+       │
+       ▼
+┌──────────────────────────────────────────┐
+│        KILL CHAIN EXPANSION              │
+│  Add techniques from adjacent phases     │
+└──────────────────────────────────────────┘
+       │
+       ▼
+┌──────────────────────────────────────────┐
+│     TOON CONTEXT ENCODING (~40% ↓)       │
+└──────────────────────────────────────────┘
+       │
+       ▼
+┌──────────────────────────────────────────┐
+│  STAGE 1: NODE SELECTION (LLM)           │
+│  "Which candidates apply to finding?"    │
+│  Output: technique IDs + confidence      │
+└──────────────────────────────────────────┘
+       │
+       ▼
+┌──────────────────────────────────────────┐
+│      GRAPH ENRICHMENT (SPARQL)           │
+│  Fetch mitigations, D3FEND, detections   │
+└──────────────────────────────────────────┘
+       │
+       ▼
+┌──────────────────────────────────────────┐
+│  STAGE 2: REMEDIATION WRITING (LLM)      │
+│  "How do we fix the selected issues?"    │
+│  Output: prioritized implementation      │
+└──────────────────────────────────────────┘
+       │
+       ▼
+┌─────────────┐
+│   Result    │
+└─────────────┘
+```
+
+### Default Feature Flags
+
+All analysis features are enabled by default:
+
+| Feature | Default | Flag to Disable |
+|---------|---------|-----------------|
+| Two-Stage LLM | ✓ Enabled | `--single-stage` |
+| TOON Format | ✓ Enabled | `--no-toon` |
+| Hybrid Retrieval | ✓ Enabled | `--no-hybrid` |
+| Kill Chain Bias | ✓ Enabled | `--no-kill-chain` |
+
+### LLM Analysis Modes
+
+**Two-Stage (default)**: Separate LLM calls for node selection and remediation
+```
+Finding → Retrieval → LLM1 (Select Nodes) → LLM2 (Write Remediation) → Results
+```
+- Stage 1 focuses on: "Which candidates apply?"
+- Stage 2 focuses on: "How do we fix the selected issues?"
+- Reduces hallucination by constraining Stage 1 to candidates
+- Better product-specific guidance (Stage 2 has full context)
+
+**Single-Stage**: One LLM call for classification + remediation
+- Faster, simpler
+- Use `--single-stage` flag to enable
+
+### TOON Format
+
+Token-Oriented Object Notation reduces LLM context size by ~40%:
+```
+CANDIDATE TECHNIQUES
+attack_id, name, tactics, similarity, platforms
+T1110.003, Password Spraying, Credential Access, 0.87, Windows;Linux;Azure AD
+```
+
+vs JSON:
+```json
+{"techniques": [{"attack_id": "T1110.003", "name": "Password Spraying"...}]}
+```
