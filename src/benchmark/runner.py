@@ -29,7 +29,6 @@ class BenchmarkConfig:
     two_stage: bool = False
     use_toon: bool = True
     use_bm25: bool = True
-    use_kill_chain: bool = True
 
 
 @dataclass
@@ -200,7 +199,6 @@ class BenchmarkRunner:
             two_stage=config.two_stage,
             use_toon=config.use_toon,
             use_bm25=config.use_bm25,
-            use_kill_chain=config.use_kill_chain,
         )
 
         # Run analysis with timing

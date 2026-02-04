@@ -269,7 +269,6 @@ class AttackAnalyzer:
         two_stage: bool = False,
         use_toon: bool = True,
         use_bm25: bool = True,
-        use_kill_chain: bool = True,
         expand_by_mitigation: bool = True,
     ):
         """
@@ -281,8 +280,7 @@ class AttackAnalyzer:
             two_stage: Use two-stage LLM architecture (default False)
             use_toon: Use TOON format for context (default True)
             use_bm25: Use BM25 hybrid retrieval (default True)
-            use_kill_chain: Include kill chain adjacent techniques (default True)
-            expand_by_mitigation: Expand candidates via shared mitigations (default False)
+            expand_by_mitigation: Expand candidates via shared mitigations (default True)
         """
         self.hybrid = hybrid_engine
         if llm_backend is None:
@@ -292,7 +290,6 @@ class AttackAnalyzer:
         self.two_stage = two_stage
         self.use_toon = use_toon
         self.use_bm25 = use_bm25
-        self.use_kill_chain = use_kill_chain
         self.expand_by_mitigation = expand_by_mitigation
 
         # Lazy-load two-stage components
@@ -332,7 +329,6 @@ class AttackAnalyzer:
             top_k=top_k,
             enrich=True,
             use_bm25=self.use_bm25,
-            use_kill_chain=self.use_kill_chain,
             expand_by_mitigation=self.expand_by_mitigation,
         )
 
@@ -441,10 +437,6 @@ Analyze this finding and provide:
 
         # Build TOON context for Stage 1 (techniques only, no mitigations/D3FEND yet)
         candidates_toon = techniques_to_toon(hybrid_result.techniques, include_description=True)
-
-        # Add kill chain context if available
-        if hybrid_result.kill_chain_context:
-            candidates_toon += f"\n\nKILL CHAIN CONTEXT\n{hybrid_result.kill_chain_context}"
 
         selection = self.selector.select(finding_text, candidates_toon, valid_technique_ids)
 

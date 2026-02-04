@@ -410,7 +410,6 @@ def analyze(
     two_stage: bool = typer.Option(False, "--two-stage/--single-stage", help="Use two-stage LLM (separate selection and remediation)"),
     toon: bool = typer.Option(True, "--toon/--no-toon", help="Use TOON format for reduced token usage"),
     hybrid: bool = typer.Option(True, "--hybrid/--no-hybrid", help="Use hybrid BM25+semantic retrieval"),
-    kill_chain: bool = typer.Option(True, "--kill-chain/--no-kill-chain", help="Include kill chain adjacent techniques"),
     expand_mitigations: bool = typer.Option(True, "--expand-mitigations/--no-expand-mitigations", help="Expand candidates via shared mitigations"),
 ):
     """Analyze an attack narrative to identify ATT&CK techniques and suggest remediation.
@@ -450,8 +449,6 @@ def analyze(
         mode_info.append("TOON")
     if hybrid:
         mode_info.append("hybrid-retrieval")
-    if kill_chain:
-        mode_info.append("kill-chain")
     if expand_mitigations:
         mode_info.append("mitigation-expansion")
 
@@ -475,7 +472,6 @@ def analyze(
         two_stage=two_stage,
         use_toon=toon,
         use_bm25=hybrid,
-        use_kill_chain=kill_chain,
         expand_by_mitigation=expand_mitigations,
     )
 
@@ -528,7 +524,6 @@ def benchmark(
     two_stage: bool = typer.Option(False, "--two-stage/--single-stage", help="Use two-stage LLM architecture"),
     toon: bool = typer.Option(True, "--toon/--no-toon", help="Use TOON format for reduced token usage"),
     hybrid: bool = typer.Option(True, "--hybrid/--no-hybrid", help="Use hybrid BM25+semantic retrieval"),
-    kill_chain: bool = typer.Option(True, "--kill-chain/--no-kill-chain", help="Include kill chain analysis"),
 ):
     """Run benchmark tests against LLM models for ATT&CK analysis.
 
@@ -580,7 +575,6 @@ def benchmark(
         two_stage=two_stage,
         use_toon=toon,
         use_bm25=hybrid,
-        use_kill_chain=kill_chain,
     )
 
     # Run benchmark
@@ -608,7 +602,6 @@ def repl(
     two_stage: bool = typer.Option(False, "--two-stage/--single-stage", help="Use two-stage LLM for analyze"),
     toon: bool = typer.Option(True, "--toon/--no-toon", help="Use TOON format for reduced token usage"),
     hybrid: bool = typer.Option(True, "--hybrid/--no-hybrid", help="Use hybrid BM25+semantic retrieval"),
-    kill_chain: bool = typer.Option(True, "--kill-chain/--no-kill-chain", help="Include kill chain analysis"),
 ):
     """Start an interactive graph browser session."""
     import atexit
@@ -684,7 +677,6 @@ def repl(
                     two_stage=two_stage,
                     use_toon=toon,
                     use_bm25=hybrid,
-                    use_kill_chain=kill_chain,
                 )
         return _analyzer
 

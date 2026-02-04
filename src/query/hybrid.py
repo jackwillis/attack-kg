@@ -356,8 +356,6 @@ class HybridQueryEngine:
         use_bm25: bool = True,
         use_cooccurrence: bool = True,
         expand_by_mitigation: bool = False,
-        use_kill_chain: bool = False,
-        kill_chain_window: int = 2,
     ) -> HybridQueryResult:
         """
         Execute a hybrid query.
@@ -369,8 +367,6 @@ class HybridQueryEngine:
             use_bm25: Whether to use BM25 keyword search alongside semantic
             use_cooccurrence: Whether to boost techniques that co-occur in real attacks
             expand_by_mitigation: Whether to add techniques that share mitigations with candidates
-            use_kill_chain: Whether to add adjacent kill chain techniques (deprecated)
-            kill_chain_window: Number of adjacent tactics to include
 
         Returns:
             HybridQueryResult with techniques and context
@@ -477,70 +473,6 @@ class HybridQueryEngine:
             techniques=enriched_techniques,
             metadata=metadata,
         )
-
-    def _get_adjacent_tactics(self, detected_tactics: list[str], window: int = 2) -> list[str]:
-        """
-        Get tactics that typically follow the detected ones in the kill chain.
-
-        Args:
-            detected_tactics: List of detected tactic shortnames (e.g., ["initial-access", "execution"])
-            window: Number of subsequent tactics to return
-
-        Returns:
-            List of adjacent tactic shortnames
-        """
-        indices = []
-        for tactic in detected_tactics:
-            if tactic in KILL_CHAIN_ORDER:
-                indices.append(KILL_CHAIN_ORDER.index(tactic))
-
-        if not indices:
-            return []
-
-        max_idx = max(indices)
-        adjacent = []
-        for i in range(1, window + 1):
-            next_idx = max_idx + i
-            if next_idx < len(KILL_CHAIN_ORDER):
-                adjacent.append(KILL_CHAIN_ORDER[next_idx])
-
-        return adjacent
-
-    def _get_techniques_from_tactics(self, tactics: list[str], limit: int = 3) -> list[EnrichedTechnique]:
-        """
-        Get representative techniques from the specified tactics.
-
-        Args:
-            tactics: List of tactic shortnames
-            limit: Maximum techniques per tactic
-
-        Returns:
-            List of EnrichedTechnique objects
-        """
-        techniques = []
-        seen_ids = set()
-
-        for tactic in tactics:
-            tactic_techs = self.graph.get_techniques_for_tactic(tactic)
-            count = 0
-            for tech in tactic_techs:
-                if tech["attack_id"] not in seen_ids and count < limit:
-                    seen_ids.add(tech["attack_id"])
-                    # Create a minimal enriched technique
-                    techniques.append(EnrichedTechnique(
-                        attack_id=tech["attack_id"],
-                        name=tech["name"],
-                        description="",
-                        similarity=0.5,  # Default similarity for adjacent techniques
-                        tactics=[tactic],
-                        groups=[],
-                        mitigations=[],
-                        software=[],
-                        subtechniques=[],
-                    ))
-                    count += 1
-
-        return techniques
 
     def _enrich_technique(self, semantic_result: SemanticResult) -> EnrichedTechnique:
         """Enrich a semantic result with graph relationships."""
