@@ -2,7 +2,20 @@
 
 A neuro-symbolic system combining MITRE ATT&CK, D3FEND, LOLBAS, and GTFOBins as an RDF knowledge graph with vector embeddings for intelligent threat intelligence querying and defensive recommendations.
 
-## Quick Start
+## Quick Start (Docker)
+
+```bash
+# Interactive REPL with Ollama on host (recommended)
+docker run -it --network=host -e OLLAMA_HOST=http://localhost:11434 jackwillis/attack-kg repl
+
+# Look up a technique
+docker run jackwillis/attack-kg technique T1110.003
+
+# Analyze a finding
+docker run --network=host jackwillis/attack-kg analyze "password spraying against Azure AD"
+```
+
+## Quick Start (Local)
 
 ```bash
 # Install dependencies
@@ -33,15 +46,14 @@ uv run attack-kg search "certutil download" --hybrid
 uv run attack-kg countermeasures T1110.003
 
 # Analyze a finding for ATT&CK techniques and remediation
-# (defaults: two-stage LLM, TOON format, hybrid retrieval, kill chain context)
+# (defaults: TOON format, hybrid retrieval with co-occurrence boosting)
 uv run attack-kg analyze "password spraying against Azure AD"
 uv run attack-kg analyze --file finding.txt
 
-# Analyze with specific options disabled
-uv run attack-kg analyze --single-stage "finding"  # Use single LLM call
+# Analyze with specific options
+uv run attack-kg analyze --two-stage "finding"     # Experimental two-stage LLM
 uv run attack-kg analyze --no-toon "finding"       # Use JSON format (more tokens)
 uv run attack-kg analyze --no-hybrid "finding"     # Semantic-only retrieval
-uv run attack-kg analyze --no-kill-chain "finding" # No kill chain expansion
 
 # Run SPARQL queries
 uv run attack-kg query "SELECT ?name WHERE { ?t a attack:Technique ; rdfs:label ?name } LIMIT 5"
@@ -147,17 +159,15 @@ The `analyze` command uses a sophisticated pipeline with the following features 
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| **Two-Stage LLM** | Enabled | Separates node selection (Stage 1) from remediation writing (Stage 2) for reduced hallucination |
 | **TOON Format** | Enabled | Token-Oriented Object Notation reduces LLM context by ~40% |
 | **Hybrid Retrieval** | Enabled | BM25 keyword + semantic search with Reciprocal Rank Fusion |
-| **Kill Chain Bias** | Enabled | Suggests techniques from adjacent kill chain phases |
+| **Co-occurrence Bias** | Enabled | Boosts techniques that appear together in real-world attacks |
 
-To disable any feature, use the corresponding flag:
+Optional features:
 ```bash
-uv run attack-kg analyze --single-stage "finding"     # Single LLM call
+uv run attack-kg analyze --two-stage "finding"        # Experimental two-stage LLM
 uv run attack-kg analyze --no-toon "finding"          # JSON format
-uv run attack-kg analyze --no-hybrid "finding"        # Semantic-only
-uv run attack-kg analyze --no-kill-chain "finding"    # No kill chain expansion
+uv run attack-kg analyze --no-hybrid "finding"        # Semantic-only retrieval
 ```
 
 ## Architecture
@@ -195,7 +205,7 @@ uv run attack-kg analyze --no-kill-chain "finding"    # No kill chain expansion
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Analysis Pipeline (Two-Stage)
+### Analysis Pipeline
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -224,22 +234,30 @@ uv run attack-kg analyze --no-kill-chain "finding"    # No kill chain expansion
 │  │              ┌──────────────────────┐                                 │  │
 │  │              │  Reciprocal Rank     │                                 │  │
 │  │              │  Fusion (k=60)       │                                 │  │
-│  │              │                      │                                 │  │
 │  │              │  score = Σ 1/(k+r)   │                                 │  │
 │  │              └──────────────────────┘                                 │  │
 │  └──────────────────────────────────────────────────────────────────────┘  │
 │                         │                                                   │
 │                         ▼                                                   │
 │  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │                    KILL CHAIN EXPANSION                               │  │
+│  │                    CO-OCCURRENCE BOOSTING                             │  │
 │  │                                                                       │  │
-│  │  Detected: Initial Access, Execution                                  │  │
-│  │      │                                                                │  │
-│  │      ▼                                                                │  │
-│  │  Adjacent: Persistence, Privilege Escalation (window=2)              │  │
-│  │      │                                                                │  │
-│  │      ▼                                                                │  │
-│  │  Add techniques from adjacent phases to candidates                   │  │
+│  │  For top 3 candidates, query: "What techniques appear together       │  │
+│  │  in the same campaigns/groups?"                                      │  │
+│  │                                                                       │  │
+│  │  Boost techniques that co-occur in real-world attacks                │  │
+│  │  (grounded in actual threat intelligence, not structural adjacency) │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                         │                                                   │
+│                         ▼                                                   │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │              GRAPH ENRICHMENT (SPARQL)                                │  │
+│  │                                                                       │  │
+│  │  For each candidate technique:                                       │  │
+│  │  ├── Get mitigations (with inheritance for subtechniques)           │  │
+│  │  ├── Get D3FEND countermeasures (via mitigation mappings)           │  │
+│  │  ├── Get software/malware that implements the technique             │  │
+│  │  └── Get detection strategies and data sources                       │  │
 │  └──────────────────────────────────────────────────────────────────────┘  │
 │                         │                                                   │
 │                         ▼                                                   │
@@ -256,44 +274,14 @@ uv run attack-kg analyze --no-kill-chain "finding"    # No kill chain expansion
 │                         │                                                   │
 │                         ▼                                                   │
 │  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │                    STAGE 1: NODE SELECTION                            │  │
+│  │                    LLM ANALYSIS (Single-Stage)                        │  │
 │  │                                                                       │  │
-│  │  Input: Finding + TOON candidates                                    │  │
-│  │  Task: Select which techniques apply, with evidence                   │  │
-│  │  Output: IDs only (id, confidence, evidence)                         │  │
-│  │                                                                       │  │
-│  │  ┌─────────────────────────────────────────────────────────────────┐ │  │
-│  │  │ LLM: "Select techniques from candidates that match the finding" │ │  │
-│  │  └─────────────────────────────────────────────────────────────────┘ │  │
+│  │  Input: Finding + TOON context (techniques, mitigations, D3FEND)    │  │
+│  │  Task: Classify techniques + write remediation guidance              │  │
+│  │  Output: IDs only (validated against retrieval set)                  │  │
 │  │                                                                       │  │
 │  │  Validation: Filter hallucinated IDs (only keep IDs from candidates) │  │
-│  │  Rehydration: Look up name, tactic, description from graph          │  │
-│  └──────────────────────────────────────────────────────────────────────┘  │
-│                         │                                                   │
-│                         ▼                                                   │
-│  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │              GRAPH ENRICHMENT (SPARQL)                                │  │
-│  │                                                                       │  │
-│  │  For each selected technique:                                        │  │
-│  │  ├── Get mitigations (with inheritance for subtechniques)           │  │
-│  │  ├── Get D3FEND countermeasures (via mitigation mappings)           │  │
-│  │  └── Get detection data sources                                      │  │
-│  └──────────────────────────────────────────────────────────────────────┘  │
-│                         │                                                   │
-│                         ▼                                                   │
-│  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │                    STAGE 2: REMEDIATION WRITING                       │  │
-│  │                                                                       │  │
-│  │  Input: Finding + Selected techniques + Mitigations + D3FEND         │  │
-│  │  Task: Write product-specific implementation guidance                │  │
-│  │  Output: IDs only (id, priority, implementation)                     │  │
-│  │                                                                       │  │
-│  │  ┌─────────────────────────────────────────────────────────────────┐ │  │
-│  │  │ LLM: Context extraction → "Write remediation for techniques"    │ │  │
-│  │  └─────────────────────────────────────────────────────────────────┘ │  │
-│  │                                                                       │  │
-│  │  Validation: Filter invalid mitigation/D3FEND IDs                    │  │
-│  │  Rehydration: Look up names from graph (mitigations, D3FEND)        │  │
+│  │  Rehydration: Look up names from authoritative graph                 │  │
 │  └──────────────────────────────────────────────────────────────────────┘  │
 │                         │                                                   │
 │                         ▼                                                   │
@@ -303,27 +291,10 @@ uv run attack-kg analyze --no-kill-chain "finding"    # No kill chain expansion
 │  │  ├── Selected Techniques (with confidence, evidence, tactic)         │  │
 │  │  ├── ATT&CK Mitigations (prioritized, with implementation steps)    │  │
 │  │  ├── D3FEND Recommendations (linked to mitigations)                  │  │
-│  │  ├── Detection Recommendations (data sources, rationale)            │  │
-│  │  └── Kill Chain Analysis (attack lifecycle context)                  │  │
+│  │  └── Detection Recommendations (data sources, rationale)            │  │
 │  └──────────────────────────────────────────────────────────────────────┘  │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Kill Chain Phases
-
-The system uses MITRE ATT&CK's 14-phase kill chain for inductive bias:
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  1. Reconnaissance     │  5. Persistence         │  9. Discovery            │
-│  2. Resource Dev       │  6. Privilege Esc       │ 10. Lateral Movement     │
-│  3. Initial Access     │  7. Defense Evasion     │ 11. Collection           │
-│  4. Execution          │  8. Credential Access   │ 12. C2 / 13. Exfil / 14. │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-Example: If finding mentions "Initial Access", system suggests techniques from
-         Execution and Persistence phases (window=2 forward in kill chain).
 ```
 
 ### Components
@@ -332,7 +303,7 @@ Example: If finding mentions "Initial Access", system suggests techniques from
 - **ChromaDB** - Vector store for semantic similarity search
 - **sentence-transformers** - Local embeddings (nomic-embed-text-v1.5, pinned revision)
 - **BM25** - Keyword-based retrieval using rank-bm25 for exact term matching
-- **Two-Stage LLM** - Separate selection and remediation for reduced hallucination
+- **Co-occurrence Boosting** - Techniques that appear together in real attacks boost each other
 - **TOON Encoder** - Token-efficient context format (~40% token reduction)
 
 ## Data
