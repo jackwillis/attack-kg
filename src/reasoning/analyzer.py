@@ -1067,13 +1067,6 @@ def print_analysis_result(result: AnalysisResult) -> None:
             )
             console.print(f"  [dim]Evidence:[/dim] {tech.evidence}")
             console.print(f"  [dim]Tactic:[/dim] {', '.join(tech.tactics)}")
-
-            if tech.groups:
-                group_names = ", ".join(g.get("name", g.get("attack_id", "")) for g in tech.groups[:3])
-                if len(tech.groups) > 3:
-                    group_names += f" (+{len(tech.groups) - 3} more)"
-                console.print(f"  [dim]Groups:[/dim] {group_names}")
-
             console.print()
     else:
         console.print("\n[yellow]No techniques identified with confidence.[/yellow]\n")
