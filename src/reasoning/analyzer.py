@@ -182,20 +182,20 @@ Determine based on evidence:
 - "vulnerability": CVE references, misconfigurations, or exposures without exploitation evidence
 
 ### STEP 3: TECHNIQUE SELECTION (use only provided candidates) ###
-ATT&CK techniques describe attacker ACTIONS, not vulnerabilities or exposures.
-
 For "attack_narrative" findings:
 - Select techniques with direct evidence of attacker behavior
 - Quote evidence verbatim
 
 For "vulnerability" findings:
-- Only select techniques if the finding shows the vulnerability being actively exploited
-- An exposed attack surface (e.g., login page, open port) is NOT evidence of a technique
-- If the finding is purely an exposure with no exploitation evidence, return empty techniques array
+- If the vulnerability describes a SPECIFIC ATTACK MECHANISM that maps to a technique, select it
+  Example: "authentication bypass via alternate channel" → T1550 (Use Alternate Authentication Material)
+  Example: "allows remote code execution" → T1203 (Exploitation for Client Execution)
+- If the finding is just an exposure with NO specific mechanism (e.g., "login page exposed"), return empty
+  Example: "admin portal accessible from internet" → no specific technique, return empty
 
 Confidence levels:
 - high: Explicit match between finding and technique description
-- medium: Strong inference from context
+- medium: Strong inference from context (including mechanism-described vulnerabilities)
 - low: Possible but circumstantial
 
 If no candidates match with at least medium confidence, return empty techniques array.
