@@ -178,6 +178,139 @@ def groups_to_toon(groups: list[dict[str, Any]]) -> str:
     return encode_table(headers, rows, "KNOWN GROUPS")
 
 
+def software_to_toon(techniques: list[Any]) -> str:
+    """
+    Extract and format software (malware/tools) from techniques.
+
+    Args:
+        techniques: List of EnrichedTechnique objects
+
+    Returns:
+        TOON-formatted software table
+    """
+    # Collect unique software across all techniques
+    software_map: dict[str, dict[str, Any]] = {}
+    for tech in techniques:
+        for sw in tech.software:
+            sw_id = sw.get("attack_id", "")
+            if sw_id not in software_map:
+                software_map[sw_id] = {
+                    "attack_id": sw_id,
+                    "name": sw.get("name", ""),
+                    "type": sw.get("type", ""),
+                    "techniques": [tech.attack_id],
+                }
+            else:
+                software_map[sw_id]["techniques"].append(tech.attack_id)
+
+    if not software_map:
+        return "RELATED SOFTWARE\nNo software found."
+
+    headers = ["software_id", "name", "type", "implements_techniques"]
+    rows = []
+
+    # Sort by number of techniques (most relevant first), limit to top 10
+    sorted_software = sorted(
+        software_map.values(),
+        key=lambda x: len(x["techniques"]),
+        reverse=True
+    )[:10]
+
+    for sw in sorted_software:
+        techs = ";".join(sw["techniques"][:5])  # Limit techniques shown
+        rows.append([sw["attack_id"], sw["name"], sw["type"], techs])
+
+    return encode_table(headers, rows, "RELATED SOFTWARE")
+
+
+def campaigns_to_toon(techniques: list[Any]) -> str:
+    """
+    Extract and format campaigns from techniques.
+
+    Args:
+        techniques: List of EnrichedTechnique objects
+
+    Returns:
+        TOON-formatted campaigns table
+    """
+    # Collect unique campaigns across all techniques
+    campaign_map: dict[str, dict[str, Any]] = {}
+    for tech in techniques:
+        for camp in tech.campaigns:
+            camp_id = camp.get("attack_id", "")
+            if camp_id not in campaign_map:
+                campaign_map[camp_id] = {
+                    "attack_id": camp_id,
+                    "name": camp.get("name", ""),
+                    "techniques": [tech.attack_id],
+                }
+            else:
+                campaign_map[camp_id]["techniques"].append(tech.attack_id)
+
+    if not campaign_map:
+        return "RELATED CAMPAIGNS\nNo campaigns found."
+
+    headers = ["campaign_id", "name", "uses_techniques"]
+    rows = []
+
+    # Sort by number of techniques (most relevant first), limit to top 5
+    sorted_campaigns = sorted(
+        campaign_map.values(),
+        key=lambda x: len(x["techniques"]),
+        reverse=True
+    )[:5]
+
+    for camp in sorted_campaigns:
+        techs = ";".join(camp["techniques"][:5])
+        rows.append([camp["attack_id"], camp["name"], techs])
+
+    return encode_table(headers, rows, "RELATED CAMPAIGNS")
+
+
+def detection_strategies_to_toon(techniques: list[Any]) -> str:
+    """
+    Extract and format detection strategies from techniques.
+
+    Args:
+        techniques: List of EnrichedTechnique objects
+
+    Returns:
+        TOON-formatted detection strategies table
+    """
+    # Collect unique detection strategies across all techniques
+    strategy_map: dict[str, dict[str, Any]] = {}
+    for tech in techniques:
+        for det in tech.detection_strategies:
+            det_id = det.get("attack_id", det.get("name", ""))
+            if det_id and det_id not in strategy_map:
+                strategy_map[det_id] = {
+                    "id": det_id,
+                    "name": det.get("name", det_id),
+                    "techniques": [tech.attack_id],
+                }
+            elif det_id:
+                strategy_map[det_id]["techniques"].append(tech.attack_id)
+
+    if not strategy_map:
+        return "DETECTION STRATEGIES\nNo detection strategies found."
+
+    headers = ["strategy", "detects_techniques"]
+    rows = []
+
+    # Sort by coverage (most techniques first), limit to top 10
+    sorted_strategies = sorted(
+        strategy_map.values(),
+        key=lambda x: len(x["techniques"]),
+        reverse=True
+    )[:10]
+
+    for det in sorted_strategies:
+        techs = ";".join(det["techniques"][:5])
+        rows.append([det["name"], techs])
+
+    return encode_table(headers, rows, "DETECTION STRATEGIES")
+
+
 def data_sources_to_toon(techniques: list[Any]) -> str:
     """
     Extract and format data sources from techniques for detection context.
@@ -249,6 +382,9 @@ def build_toon_context(
     d3fend_techniques: list[dict[str, Any]],
     include_description: bool = True,
     include_data_sources: bool = True,
+    include_software: bool = True,
+    include_campaigns: bool = True,
+    include_detection_strategies: bool = True,
     adjacent_techniques: list[Any] | None = None,
     kill_chain_context: str = "",
 ) -> str:
@@ -263,6 +399,9 @@ def build_toon_context(
         d3fend_techniques: D3FEND techniques dict
         include_description: Include technique descriptions
         include_data_sources: Include data sources section
+        include_software: Include related software (malware/tools)
+        include_campaigns: Include related campaigns
+        include_detection_strategies: Include detection strategies
         adjacent_techniques: Kill chain adjacent techniques
         kill_chain_context: Kill chain context string
 
@@ -274,11 +413,29 @@ def build_toon_context(
     # Candidate techniques
     sections.append(techniques_to_toon(techniques, include_description=include_description))
 
+    # Related software (malware/tools that implement these techniques)
+    if include_software and techniques:
+        software_section = software_to_toon(techniques)
+        if "No software found" not in software_section:
+            sections.append(software_section)
+
+    # Related campaigns
+    if include_campaigns and techniques:
+        campaigns_section = campaigns_to_toon(techniques)
+        if "No campaigns found" not in campaigns_section:
+            sections.append(campaigns_section)
+
     # Mitigations
     sections.append(mitigations_to_toon(mitigations))
 
     # D3FEND
     sections.append(d3fend_to_toon(d3fend_techniques))
+
+    # Detection strategies
+    if include_detection_strategies and techniques:
+        detection_section = detection_strategies_to_toon(techniques)
+        if "No detection strategies found" not in detection_section:
+            sections.append(detection_section)
 
     # Data sources for detection
     if include_data_sources and techniques:

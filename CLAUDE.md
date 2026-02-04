@@ -9,18 +9,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 uv sync
 
 # Data pipeline (run in order for first setup)
-uv run attack-kg download    # Download STIX + D3FEND (use --skip-d3fend to omit)
+uv run attack-kg download    # Download STIX + D3FEND + LOLBAS + GTFOBins
 uv run attack-kg ingest      # Convert STIX → RDF (N-Triples)
 uv run attack-kg build       # Load into Oxigraph + build ChromaDB vectors
+
+# Download options (all enabled by default)
+uv run attack-kg download --skip-d3fend     # Omit D3FEND
+uv run attack-kg download --skip-lolbas     # Omit LOLBAS
+uv run attack-kg download --skip-gtfobins   # Omit GTFOBins
+
+# Build options (all enabled by default)
+uv run attack-kg build --skip-lolbas        # Omit LOLBAS from vector store
+uv run attack-kg build --skip-gtfobins      # Omit GTFOBins from vector store
 
 # CLI usage
 uv run attack-kg technique T1110.003    # Lookup technique
 uv run attack-kg group APT29            # Group techniques
 uv run attack-kg search "credential theft"  # Semantic search
 uv run attack-kg search "certutil download" --hybrid  # Hybrid BM25+semantic search
-uv run attack-kg analyze "password spraying against Azure AD"  # Full analysis (two-stage, TOON, hybrid, kill-chain all default on)
+uv run attack-kg analyze "password spraying against Azure AD"  # Full analysis (TOON, hybrid, kill-chain all default on)
 uv run attack-kg analyze --file finding.txt  # Analyze from file
-uv run attack-kg analyze --single-stage "finding"  # Disable two-stage (single LLM call)
+uv run attack-kg analyze --two-stage "finding"  # Enable two-stage LLM pipeline (experimental)
 uv run attack-kg analyze --no-toon "finding"  # Use JSON format instead of TOON
 uv run attack-kg analyze --no-hybrid "finding"  # Semantic-only retrieval
 uv run attack-kg analyze --no-kill-chain "finding"  # Disable kill chain expansion
@@ -28,7 +37,7 @@ uv run attack-kg countermeasures T1110.003  # Get D3FEND countermeasures for tec
 uv run attack-kg query "SELECT ..."     # Raw SPARQL
 uv run attack-kg repl                   # Interactive mode (all features enabled by default)
 uv run attack-kg repl --model gemma3:4b # REPL with alternate model
-uv run attack-kg repl --single-stage    # REPL with legacy single-stage analysis
+uv run attack-kg repl --two-stage       # REPL with experimental two-stage analysis
 
 # Graph Browser REPL commands (supports readline history + tab completion)
 # Navigation:
@@ -58,7 +67,7 @@ uv run attack-kg benchmark gpt-oss:20b             # Single model benchmark
 uv run attack-kg benchmark gpt-oss:20b,gemma3:4b   # Multi-model comparison
 uv run attack-kg benchmark gpt-oss:20b -o results/ # Save detailed results
 uv run attack-kg benchmark gpt-oss:20b --markdown  # Generate markdown report
-uv run attack-kg benchmark gpt-oss:20b --single-stage  # Benchmark with legacy single-stage mode
+uv run attack-kg benchmark gpt-oss:20b --two-stage     # Benchmark with experimental two-stage mode
 
 # Environment variables
 # OLLAMA_HOST       - Ollama server URL (default: http://localhost:11434)
@@ -79,7 +88,10 @@ uv run pytest -k "test_name"            # Single test
 ### Data Flow
 ```
 STIX JSON → StixToRdfConverter → N-Triples → Oxigraph (SPARQL)
-                                          ↘ ChromaDB (vectors)
+D3FEND TTL ────────────────────────────────↗
+                                           ↘
+LOLBAS YAML ─┬─ Parsed + Embedded ──────────→ ChromaDB (vectors)
+GTFOBins MD ─┘
 ```
 
 ### Key Components
@@ -94,13 +106,17 @@ STIX JSON → StixToRdfConverter → N-Triples → Oxigraph (SPARQL)
 
 - **`src/ingest/stix_to_rdf.py`** - Two-pass conversion: entities first (builds STIX ID → URI mapping), then relationships (resolves references).
 
-- **`src/ingest/embeddings.py`** - Generates embeddings with sentence-transformers (nomic-embed-text-v1.5, 8K token context), stores in ChromaDB.
+- **`src/ingest/embeddings.py`** - Generates embeddings with sentence-transformers (nomic-embed-text-v1.5, 8K token context), stores in ChromaDB. Includes ATT&CK techniques plus LOLBAS/GTFOBins tool mappings.
 
 - **`src/query/hybrid.py`** - `HybridQueryEngine` combines semantic search and BM25 keyword search using Reciprocal Rank Fusion (RRF), with SPARQL graph enrichment.
 
 - **`src/query/keyword.py`** - `KeywordSearchEngine` provides BM25-based keyword search for exact term matching (technique IDs, tool names, technical terms).
 
 - **`src/ingest/d3fend.py`** - Downloads MITRE D3FEND ontology (TTL format) for defensive technique mapping.
+
+- **`src/ingest/lolbas.py`** - Downloads and parses LOLBAS (Living Off The Land Binaries and Scripts) data. Provides Windows binary → ATT&CK technique mappings (e.g., certutil → T1105).
+
+- **`src/ingest/gtfobins.py`** - Downloads and parses GTFOBins data. Provides Linux binary → ATT&CK technique mappings based on function categories (e.g., curl file-download → T1105).
 
 - **`src/benchmark/`** - Automated model benchmarking harness:
   - `testcases.py` - Test case definitions with ground truth techniques/mitigations
@@ -112,9 +128,10 @@ STIX JSON → StixToRdfConverter → N-Triples → Oxigraph (SPARQL)
 
 - **`src/reasoning/toon_encoder.py`** - TOON (Token-Oriented Object Notation) format encoder for 30-60% token reduction in LLM context.
 
-- **`src/reasoning/stages/`** - Two-stage LLM architecture:
+- **`src/reasoning/stages/`** - Experimental two-stage LLM architecture:
   - `selector.py` - `NodeSelector` (Stage 1) selects relevant techniques from candidates
   - `remediator.py` - `RemediationWriter` (Stage 2) writes detailed remediation guidance
+  - Note: Two-stage has failure modes with smaller models; single-stage is the default
 
 ### Supported Entity Types
 
@@ -197,6 +214,7 @@ sparql = f"{tech_uri} ..."
 **Hybrid Retrieval (BM25 + Embeddings)**: Combines keyword search with semantic search using Reciprocal Rank Fusion (RRF).
 - BM25 catches exact matches: technique IDs, tool names, technical terms
 - Semantic search finds conceptually similar techniques
+- LOLBAS/GTFOBins provide explicit tool → technique mappings (certutil → T1105)
 - RRF formula: `score(d) = sum(1 / (k + rank(d)))` where k=60
 
 **Kill Chain Inductive Bias**: When enabled, adds techniques from adjacent kill chain phases:
@@ -206,7 +224,7 @@ Persistence → Privilege Escalation → Defense Evasion → Credential Access �
 Discovery → Lateral Movement → Collection → C2 → Exfiltration → Impact
 ```
 
-### Analysis Pipeline Diagram
+### Analysis Pipeline Diagram (Single-Stage, Default)
 
 ```
 ┌─────────────┐
@@ -233,29 +251,21 @@ Discovery → Lateral Movement → Collection → C2 → Exfiltration → Impact
        │
        ▼
 ┌──────────────────────────────────────────┐
-│     TOON CONTEXT ENCODING (~40% ↓)       │
-└──────────────────────────────────────────┘
-       │
-       ▼
-┌──────────────────────────────────────────┐
-│  STAGE 1: NODE SELECTION (LLM)           │
-│  "Which candidates apply to finding?"    │
-│  Output: IDs only (id, confidence, evid) │
-│  + Rehydrate names/tactics from graph    │
-└──────────────────────────────────────────┘
-       │
-       ▼
-┌──────────────────────────────────────────┐
 │      GRAPH ENRICHMENT (SPARQL)           │
 │  Fetch mitigations, D3FEND, detections   │
 └──────────────────────────────────────────┘
        │
        ▼
 ┌──────────────────────────────────────────┐
-│  STAGE 2: REMEDIATION WRITING (LLM)      │
-│  "How do we fix the selected issues?"    │
-│  Output: IDs only (id, priority, impl)   │
-│  + Rehydrate names from graph            │
+│     TOON CONTEXT ENCODING (~40% ↓)       │
+└──────────────────────────────────────────┘
+       │
+       ▼
+┌──────────────────────────────────────────┐
+│  SINGLE-STAGE LLM ANALYSIS               │
+│  "Classify finding + write remediation"  │
+│  Output: techniques, mitigations, D3FEND │
+│  + Validate IDs against retrieval set    │
 └──────────────────────────────────────────┘
        │
        ▼
@@ -266,25 +276,31 @@ Discovery → Lateral Movement → Collection → C2 → Exfiltration → Impact
 
 ### Default Feature Flags
 
-All analysis features are enabled by default:
-
-| Feature | Default | Flag to Disable |
-|---------|---------|-----------------|
-| Two-Stage LLM | ✓ Enabled | `--single-stage` |
+| Feature | Default | Flag to Change |
+|---------|---------|----------------|
+| Single-Stage LLM | ✓ Enabled | `--two-stage` to enable experimental two-stage |
 | TOON Format | ✓ Enabled | `--no-toon` |
 | Hybrid Retrieval | ✓ Enabled | `--no-hybrid` |
 | Kill Chain Bias | ✓ Enabled | `--no-kill-chain` |
 
 ### LLM Analysis Modes
 
-**Two-Stage (default)**: Separate LLM calls for node selection and remediation
+**Single-Stage (default)**: One LLM call for classification + remediation
+```
+Finding → Retrieval → LLM (Classify + Remediate) → Results
+```
+- Simpler, more reliable with smaller models
+- Combined prompt handles both technique selection and remediation
+- Recommended for most use cases
+
+**Two-Stage (experimental)**: Separate LLM calls for node selection and remediation
 ```
 Finding → Retrieval → LLM1 (Select Nodes) → LLM2 (Write Remediation) → Results
 ```
 - Stage 1 focuses on: "Which candidates apply?"
 - Stage 2 focuses on: "How do we fix the selected issues?"
-- Reduces hallucination by constraining Stage 1 to candidates
-- Better product-specific guidance (Stage 2 has full context)
+- Use `--two-stage` flag to enable
+- **Caution**: Has failure modes with smaller models—when Stage 1 returns empty selections, the entire pipeline returns empty results
 
 ### Hallucination Mitigation
 
@@ -292,23 +308,50 @@ The system uses multiple strategies to reduce LLM hallucinations:
 
 1. **ID Validation**: Filter LLM outputs to only include IDs present in retrieval context
 2. **Graph Rehydration**: Names/metadata come from authoritative graph, not LLM output
-3. **Constrained Selection**: Stage 1 prompt restricts selection to provided candidates
-4. **Labels-Only Output**: LLMs output IDs only; system looks up names from graph
+3. **Prompt Constraints**: Explicit anti-hallucination rules in prompts (don't invent config syntax, say "consult documentation" when uncertain)
+4. **Confidence Levels**: LLM must report confidence (high/medium/low) on each recommendation
 
-**Single-Stage**: One LLM call for classification + remediation
-- Faster, simpler
-- Use `--single-stage` flag to enable
+### Graph Enrichment → LLM Context
+
+The graph retrieves rich relationships for each technique. Most are passed to the LLM in TOON format:
+
+**Passed to LLM (in TOON format):**
+- Techniques: attack_id, name, tactics, similarity, platforms, description
+- Software: software_id, name, type, implements_techniques (top 10 by relevance)
+- Campaigns: campaign_id, name, uses_techniques (top 5 by relevance)
+- Mitigations: mitigation_id, name, addresses, inherited
+- D3FEND: d3fend_id, name, via_mitigation, addresses, definition
+- Detection Strategies: strategy, detects_techniques (top 10 by coverage)
+- Data Sources: data_source, techniques_covered
+- Kill Chain: detected_tactics, adjacent_tactics, adjacent_techniques
+
+**Retrieved but NOT passed to LLM:**
+- Groups (which threat actors use each technique) - available in CLI/REPL display only
 
 ### TOON Format
 
-Token-Oriented Object Notation reduces LLM context size by ~40%:
+Token-Oriented Object Notation reduces LLM context size by ~40%. Example sections:
+
 ```
 CANDIDATE TECHNIQUES
 attack_id, name, tactics, similarity, platforms
 T1110.003, Password Spraying, Credential Access, 0.87, Windows;Linux;Azure AD
+
+RELATED SOFTWARE
+software_id, name, type, implements_techniques
+S0154, Cobalt Strike, Tool, T1110.003;T1059.001
+
+RELATED CAMPAIGNS
+campaign_id, name, uses_techniques
+C0027, Operation Ghost, T1110.003
+
+AVAILABLE MITIGATIONS
+mitigation_id, name, addresses, inherited
+M1032, Multi-factor Authentication, T1110.003, false
+
+DETECTION STRATEGIES
+strategy, detects_techniques
+Credential Access Monitoring, T1110.003;T1078
 ```
 
-vs JSON:
-```json
-{"techniques": [{"attack_id": "T1110.003", "name": "Password Spraying"...}]}
-```
+vs JSON which requires ~40% more tokens for the same information.
