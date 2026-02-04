@@ -270,7 +270,7 @@ class AttackAnalyzer:
         use_toon: bool = True,
         use_bm25: bool = True,
         use_kill_chain: bool = True,
-        expand_by_mitigation: bool = False,
+        expand_by_mitigation: bool = True,
     ):
         """
         Initialize the analyzer.

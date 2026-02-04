@@ -266,6 +266,7 @@ sparql = f"{tech_uri} ..."
 | Single-Stage LLM | ✓ Enabled | `--two-stage` to enable experimental two-stage |
 | TOON Format | ✓ Enabled | `--no-toon` |
 | Hybrid Retrieval | ✓ Enabled | `--no-hybrid` |
+| Mitigation Expansion | ✓ Enabled | `--no-expand-mitigations` |
 
 ### LLM Analysis Modes
 

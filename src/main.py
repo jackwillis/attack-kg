@@ -411,7 +411,7 @@ def analyze(
     toon: bool = typer.Option(True, "--toon/--no-toon", help="Use TOON format for reduced token usage"),
     hybrid: bool = typer.Option(True, "--hybrid/--no-hybrid", help="Use hybrid BM25+semantic retrieval"),
     kill_chain: bool = typer.Option(True, "--kill-chain/--no-kill-chain", help="Include kill chain adjacent techniques"),
-    expand_mitigations: bool = typer.Option(False, "--expand-mitigations", help="Expand candidates via shared mitigations"),
+    expand_mitigations: bool = typer.Option(True, "--expand-mitigations/--no-expand-mitigations", help="Expand candidates via shared mitigations"),
 ):
     """Analyze an attack narrative to identify ATT&CK techniques and suggest remediation.
 
