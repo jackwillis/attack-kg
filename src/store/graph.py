@@ -164,19 +164,26 @@ class AttackGraph:
         PREFIX attack: <https://attack.mitre.org/>
         PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 
-        SELECT ?name ?description ?detection WHERE {{
+        SELECT ?name ?description ?detection
+               (GROUP_CONCAT(DISTINCT ?tactic; separator=",") AS ?tactics)
+        WHERE {{
             {tech_uri} rdfs:label ?name .
             OPTIONAL {{ {tech_uri} attack:description ?description }}
             OPTIONAL {{ {tech_uri} attack:detection ?detection }}
+            OPTIONAL {{ {tech_uri} attack:tactic ?tacticUri .
+                        ?tacticUri rdfs:label ?tactic }}
         }}
+        GROUP BY ?name ?description ?detection
         """
         results = self.query(sparql)
         if results:
+            tactics_str = results[0].get("tactics", "")
             return {
                 "attack_id": attack_id,
                 "name": results[0].get("name", ""),
                 "description": results[0].get("description", ""),
                 "detection": results[0].get("detection", ""),
+                "tactics": [t.strip() for t in tactics_str.split(",") if t.strip()] if tactics_str else [],
             }
         return None
 

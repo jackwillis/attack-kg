@@ -476,6 +476,9 @@ Analyze this finding and provide:
 
         selection = self.selector.select(finding_text, candidates_toon, valid_technique_ids)
 
+        # Rehydrate selected techniques with authoritative data from the graph
+        selection.rehydrate(self.hybrid.graph)
+
         if not selection.selected_techniques:
             console.print("[yellow]Stage 1: No techniques selected[/yellow]")
             return AnalysisResult(
@@ -519,19 +522,20 @@ Analyze this finding and provide:
             valid_d3fend_ids,
         )
 
-        # Build techniques list from Stage 1 selection
+        # Build techniques list from Stage 1 selection (rehydrated with graph data)
         tech_lookup = {t.attack_id: t for t in hybrid_result.techniques}
         techniques = []
         for sel_tech in selection.selected_techniques:
+            # Get groups from hybrid_result (already retrieved during search)
             enriched = tech_lookup.get(sel_tech.attack_id)
             groups = enriched.groups[:5] if enriched and enriched.groups else []
 
             techniques.append(TechniqueMatch(
                 attack_id=sel_tech.attack_id,
-                name=enriched.name if enriched else "",
+                name=sel_tech.name,  # Rehydrated from graph
                 confidence=sel_tech.confidence,
                 evidence=sel_tech.evidence,
-                tactics=[sel_tech.tactic] if sel_tech.tactic else [],
+                tactics=[sel_tech.tactic] if sel_tech.tactic else [],  # Rehydrated from graph
                 groups=groups,
             ))
 

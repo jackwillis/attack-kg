@@ -18,30 +18,23 @@ NODE_SELECTION_PROMPT = """You are selecting relevant ATT&CK techniques from can
 Your ONLY job is to determine which of the provided candidate techniques apply to this security finding.
 
 RULES:
-1. You may ONLY select techniques from the provided candidates list
+1. You may ONLY select technique IDs from the provided candidates list
 2. Do NOT invent or hallucinate technique IDs
 3. Focus on evidence from the finding that matches technique descriptions
-4. Consider the kill chain context if provided
-
-For each selected technique, provide:
-- attack_id: The technique ID (must be from candidates)
-- confidence: "high", "medium", or "low"
-- evidence: Brief quote or description from finding that justifies selection
-- tactic: Primary tactic (from kill chain)
 
 Output JSON with this exact structure:
 {
     "finding_type": "attack_narrative" or "vulnerability",
-    "selected_techniques": [
-        {
-            "attack_id": "T1110.003",
-            "confidence": "high",
-            "evidence": "password spraying against Azure AD",
-            "tactic": "Credential Access"
-        }
+    "selected": [
+        {"id": "T1110.003", "confidence": "high", "evidence": "password spraying against Azure AD"}
     ],
     "kill_chain_analysis": "Brief description of attack lifecycle"
 }
+
+Fields:
+- id: Technique ID (MUST be from candidates)
+- confidence: "high", "medium", or "low"
+- evidence: Brief quote from finding that justifies selection
 
 IMPORTANT: Only output valid JSON. No markdown, no explanation outside JSON."""
 
@@ -53,7 +46,10 @@ class SelectedTechnique:
     attack_id: str
     confidence: str
     evidence: str
-    tactic: str
+    # Fields below are rehydrated from the graph, not LLM output
+    name: str = ""
+    tactic: str = ""
+    description: str = ""
 
 
 @dataclass
@@ -68,6 +64,27 @@ class SelectionResult:
     def get_technique_ids(self) -> list[str]:
         """Get list of selected technique IDs."""
         return [t.attack_id for t in self.selected_techniques]
+
+    def rehydrate(self, graph) -> "SelectionResult":
+        """
+        Rehydrate selected techniques with data from the knowledge graph.
+
+        Populates name, tactic, and description fields from authoritative graph data.
+
+        Args:
+            graph: AttackGraph instance for lookups
+
+        Returns:
+            Self for chaining
+        """
+        for tech in self.selected_techniques:
+            technique_data = graph.get_technique(tech.attack_id)
+            if technique_data:
+                tech.name = technique_data.get("name", "")
+                tech.description = technique_data.get("description", "")
+                tactics = technique_data.get("tactics", [])
+                tech.tactic = tactics[0] if tactics else ""
+        return self
 
 
 class NodeSelector:
@@ -126,14 +143,17 @@ Only select techniques that have clear evidence in the finding."""
         selected = []
         filtered_ids = []
 
-        for tech in result.get("selected_techniques", []):
-            attack_id = tech.get("attack_id", "")
+        # Support both "selected" (new format) and "selected_techniques" (legacy)
+        selections = result.get("selected", result.get("selected_techniques", []))
+
+        for tech in selections:
+            # Support both "id" (new format) and "attack_id" (legacy)
+            attack_id = tech.get("id", tech.get("attack_id", ""))
             if attack_id in valid_technique_ids:
                 selected.append(SelectedTechnique(
                     attack_id=attack_id,
                     confidence=tech.get("confidence", "medium"),
                     evidence=tech.get("evidence", ""),
-                    tactic=tech.get("tactic", ""),
                 ))
             else:
                 filtered_ids.append(attack_id)
