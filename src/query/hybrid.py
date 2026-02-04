@@ -88,16 +88,12 @@ class HybridQueryResult:
     query: str
     techniques: list[EnrichedTechnique]
     metadata: dict[str, Any] = field(default_factory=dict)
-    adjacent_techniques: list[EnrichedTechnique] = field(default_factory=list)
-    kill_chain_context: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "query": self.query,
             "techniques": [t.to_dict() for t in self.techniques],
             "metadata": self.metadata,
-            "adjacent_techniques": [t.to_dict() for t in self.adjacent_techniques],
-            "kill_chain_context": self.kill_chain_context,
         }
 
 
@@ -396,29 +392,10 @@ class HybridQueryEngine:
                 "retrieval_mode": "semantic_only",
             }
 
-        # Step 3: Optionally add kill chain adjacent techniques
-        adjacent_techniques = []
-        kill_chain_context = ""
-        if use_kill_chain and enriched_techniques:
-            detected_tactics = set()
-            for tech in enriched_techniques:
-                for tactic in tech.tactics:
-                    normalized = tactic.lower().replace(" ", "-")
-                    detected_tactics.add(normalized)
-
-            adjacent_tactics = self._get_adjacent_tactics(list(detected_tactics), kill_chain_window)
-            if adjacent_tactics:
-                adjacent_techniques = self._get_techniques_from_tactics(adjacent_tactics, limit=3)
-                kill_chain_context = f"Detected: {', '.join(sorted(detected_tactics))}. Next likely: {', '.join(adjacent_tactics)}"
-                metadata["kill_chain_detected"] = list(detected_tactics)
-                metadata["kill_chain_adjacent"] = adjacent_tactics
-
         return HybridQueryResult(
             query=question,
             techniques=enriched_techniques,
             metadata=metadata,
-            adjacent_techniques=adjacent_techniques,
-            kill_chain_context=kill_chain_context,
         )
 
     def _get_adjacent_tactics(self, detected_tactics: list[str], window: int = 2) -> list[str]:

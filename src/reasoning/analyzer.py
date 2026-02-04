@@ -686,13 +686,6 @@ Analyze this finding and provide:
 
         d3fend_list = list(d3fend_by_id.values())
 
-        # Get adjacent techniques if available
-        adjacent_techniques = []
-        kill_chain_context = ""
-        if hybrid_result:
-            adjacent_techniques = hybrid_result.adjacent_techniques
-            kill_chain_context = hybrid_result.kill_chain_context
-
         # Build TOON context
         toon_context = build_toon_context(
             techniques=techniques,
@@ -700,8 +693,6 @@ Analyze this finding and provide:
             d3fend_techniques=d3fend_list,
             include_description=True,
             include_data_sources=True,
-            adjacent_techniques=adjacent_techniques,
-            kill_chain_context=kill_chain_context,
         )
 
         constraints = ContextConstraints(
