@@ -62,7 +62,7 @@ class EnrichedTechnique:
             "attack_id": self.attack_id,
             "name": self.name,
             "description": self.description,
-            "similarity": self.similarity,
+            "similarity": round(self.similarity, 3),
             "tactics": self.tactics,
             "groups": self.groups,
             "mitigations": self.mitigations,
@@ -77,7 +77,7 @@ class EnrichedTechnique:
             "url": self.url,
         }
         if self.cooccurrence_boost > 0:
-            result["cooccurrence_boost"] = self.cooccurrence_boost
+            result["cooccurrence_boost"] = round(self.cooccurrence_boost, 3)
         return result
 
 
@@ -209,6 +209,69 @@ class HybridQueryEngine:
 
         return combined
 
+    def _expand_by_shared_mitigations(
+        self,
+        candidates: list[dict[str, Any]],
+        max_expansion: int = 5,
+        expansion_weight: float = 0.6,
+    ) -> list[dict[str, Any]]:
+        """
+        Expand candidate set by adding techniques that share mitigations.
+
+        If technique A is a candidate and mitigation M addresses both A and B,
+        then B is likely relevant (an exposure enabling A might also enable B).
+
+        Args:
+            candidates: Initial RRF-fused candidates
+            max_expansion: Maximum techniques to add
+            expansion_weight: Score multiplier for expanded techniques (< 1.0)
+
+        Returns:
+            Expanded candidate list with new techniques at lower weight
+        """
+        if not candidates:
+            return candidates
+
+        seen_ids = {c["attack_id"] for c in candidates}
+        expanded_techniques: dict[str, dict[str, Any]] = {}
+
+        # For each candidate, find techniques that share mitigations
+        for candidate in candidates[:5]:  # Only expand from top 5
+            attack_id = candidate["attack_id"]
+            mitigations = self.graph.get_mitigations_for_technique(attack_id)
+
+            for mit in mitigations:
+                # Get other techniques this mitigation addresses
+                related_techniques = self.graph.get_techniques_for_mitigation(mit["attack_id"])
+
+                for tech in related_techniques:
+                    tech_id = tech["attack_id"]
+                    if tech_id not in seen_ids:
+                        if tech_id not in expanded_techniques:
+                            # Assign a weighted score based on the source candidate
+                            base_score = candidate.get("rrf_score", 0.5)
+                            expanded_techniques[tech_id] = {
+                                "attack_id": tech_id,
+                                "name": tech["name"],
+                                "rrf_score": base_score * expansion_weight,
+                                "expansion_source": attack_id,
+                                "via_mitigation": mit["attack_id"],
+                                "expanded": True,
+                            }
+                        else:
+                            # Technique found via multiple paths - boost slightly
+                            expanded_techniques[tech_id]["rrf_score"] *= 1.1
+
+        # Sort expanded by score and take top max_expansion
+        sorted_expanded = sorted(
+            expanded_techniques.values(),
+            key=lambda x: x["rrf_score"],
+            reverse=True,
+        )[:max_expansion]
+
+        # Append to candidates
+        return candidates + sorted_expanded
+
     def _boost_with_cooccurrence(
         self,
         combined: list[dict[str, Any]],
@@ -292,6 +355,7 @@ class HybridQueryEngine:
         enrich: bool = True,
         use_bm25: bool = True,
         use_cooccurrence: bool = True,
+        expand_by_mitigation: bool = False,
         use_kill_chain: bool = False,
         kill_chain_window: int = 2,
     ) -> HybridQueryResult:
@@ -304,6 +368,7 @@ class HybridQueryEngine:
             enrich: Whether to enrich with graph relationships
             use_bm25: Whether to use BM25 keyword search alongside semantic
             use_cooccurrence: Whether to boost techniques that co-occur in real attacks
+            expand_by_mitigation: Whether to add techniques that share mitigations with candidates
             use_kill_chain: Whether to add adjacent kill chain techniques (deprecated)
             kill_chain_window: Number of adjacent tactics to include
 
@@ -323,6 +388,10 @@ class HybridQueryEngine:
             # Apply co-occurrence boosting if enabled
             if use_cooccurrence:
                 combined = self._boost_with_cooccurrence(combined, top_k)
+
+            # Expand by shared mitigations if enabled
+            if expand_by_mitigation:
+                combined = self._expand_by_shared_mitigations(combined)
 
             # Take top_k and convert to pseudo-SemanticResult for enrichment
             top_results = combined[:top_k]
@@ -356,14 +425,25 @@ class HybridQueryEngine:
                         platforms=item.get("platforms", []),
                     ))
 
+            # Count expanded techniques
+            expanded_count = sum(1 for item in top_results if item.get("expanded"))
+
+            retrieval_mode = "hybrid_rrf"
+            if use_cooccurrence:
+                retrieval_mode += "_cooccurrence"
+            if expand_by_mitigation:
+                retrieval_mode += "_mitigation_expansion"
+
             metadata = {
                 "top_k": top_k,
                 "enriched": enrich,
                 "result_count": len(enriched_techniques),
-                "retrieval_mode": "hybrid_rrf" + ("_cooccurrence" if use_cooccurrence else ""),
+                "retrieval_mode": retrieval_mode,
                 "semantic_candidates": len(semantic_results),
                 "keyword_candidates": len(keyword_results),
                 "cooccurrence_enabled": use_cooccurrence,
+                "mitigation_expansion_enabled": expand_by_mitigation,
+                "expanded_techniques": expanded_count,
             }
         else:
             # Fallback to semantic-only

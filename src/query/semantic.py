@@ -25,7 +25,7 @@ class SemanticResult:
         result = {
             "attack_id": self.attack_id,
             "name": self.name,
-            "similarity": self.similarity,
+            "similarity": round(self.similarity, 3),
             "tactics": self.tactics,
             "platforms": self.platforms,
             "source": self.source,

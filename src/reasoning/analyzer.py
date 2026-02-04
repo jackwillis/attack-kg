@@ -182,12 +182,21 @@ Determine based on evidence:
 - "vulnerability": CVE references, misconfigurations, or exposures without exploitation evidence
 
 ### STEP 3: TECHNIQUE SELECTION (use only provided candidates) ###
-For each candidate technique, ask:
-1. Does the finding contain direct evidence? → Quote it verbatim as "evidence"
-2. Confidence level:
-   - high: Explicit match between finding and technique description
-   - medium: Strong inference from context
-   - low: Possible but circumstantial
+ATT&CK techniques describe attacker ACTIONS, not vulnerabilities or exposures.
+
+For "attack_narrative" findings:
+- Select techniques with direct evidence of attacker behavior
+- Quote evidence verbatim
+
+For "vulnerability" findings:
+- Only select techniques if the finding shows the vulnerability being actively exploited
+- An exposed attack surface (e.g., login page, open port) is NOT evidence of a technique
+- If the finding is purely an exposure with no exploitation evidence, return empty techniques array
+
+Confidence levels:
+- high: Explicit match between finding and technique description
+- medium: Strong inference from context
+- low: Possible but circumstantial
 
 If no candidates match with at least medium confidence, return empty techniques array.
 
@@ -261,6 +270,7 @@ class AttackAnalyzer:
         use_toon: bool = True,
         use_bm25: bool = True,
         use_kill_chain: bool = True,
+        expand_by_mitigation: bool = False,
     ):
         """
         Initialize the analyzer.
@@ -272,6 +282,7 @@ class AttackAnalyzer:
             use_toon: Use TOON format for context (default True)
             use_bm25: Use BM25 hybrid retrieval (default True)
             use_kill_chain: Include kill chain adjacent techniques (default True)
+            expand_by_mitigation: Expand candidates via shared mitigations (default False)
         """
         self.hybrid = hybrid_engine
         if llm_backend is None:
@@ -282,6 +293,7 @@ class AttackAnalyzer:
         self.use_toon = use_toon
         self.use_bm25 = use_bm25
         self.use_kill_chain = use_kill_chain
+        self.expand_by_mitigation = expand_by_mitigation
 
         # Lazy-load two-stage components
         self._selector = None
@@ -321,6 +333,7 @@ class AttackAnalyzer:
             enrich=True,
             use_bm25=self.use_bm25,
             use_kill_chain=self.use_kill_chain,
+            expand_by_mitigation=self.expand_by_mitigation,
         )
 
         if self.two_stage:

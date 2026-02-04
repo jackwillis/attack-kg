@@ -380,6 +380,18 @@ The system uses multiple strategies to reduce LLM hallucinations:
   - CVE description embeddings for semantic similarity to ATT&CK techniques
   - CISA KEV (Known Exploited Vulnerabilities) with TTP mappings
 
+- [ ] **Exposure→Technique Mappings**: Create curated mappings from common security exposures to the ATT&CK techniques they enable (similar to LOLBAS for tools→techniques). Examples:
+  - `exposed_admin_login` → [T1078, T1110, T1056.003]
+  - `default_credentials` → [T1078.001, T1110.001]
+  - `missing_mfa` → [T1078, T1110, T1621]
+  - `unpatched_public_service` → [T1190, T1210]
+
+  **LLM-assisted generation**: Use LLMs to bootstrap mappings from:
+  1. CWE descriptions → identify enabled techniques
+  2. Common pentest finding categories → map to ATT&CK
+  3. Validate against CAPEC→ATT&CK chains to reduce hallucination
+  4. Human review for quality assurance
+
 ## License
 
 This project is licensed under the **MIT License** - see [LICENSE](LICENSE) for details.

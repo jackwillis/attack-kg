@@ -411,6 +411,7 @@ def analyze(
     toon: bool = typer.Option(True, "--toon/--no-toon", help="Use TOON format for reduced token usage"),
     hybrid: bool = typer.Option(True, "--hybrid/--no-hybrid", help="Use hybrid BM25+semantic retrieval"),
     kill_chain: bool = typer.Option(True, "--kill-chain/--no-kill-chain", help="Include kill chain adjacent techniques"),
+    expand_mitigations: bool = typer.Option(False, "--expand-mitigations", help="Expand candidates via shared mitigations"),
 ):
     """Analyze an attack narrative to identify ATT&CK techniques and suggest remediation.
 
@@ -418,7 +419,7 @@ def analyze(
         attack-kg analyze "Found valid credentials through password spraying against Azure AD"
         attack-kg analyze --file finding.txt
         attack-kg analyze --single-stage "Simple finding without two-stage"
-        attack-kg analyze --no-kill-chain "Finding without kill chain expansion"
+        attack-kg analyze --expand-mitigations "Finding with mitigation-based expansion"
     """
     import json
     from src.query.hybrid import HybridQueryEngine
@@ -451,6 +452,8 @@ def analyze(
         mode_info.append("hybrid-retrieval")
     if kill_chain:
         mode_info.append("kill-chain")
+    if expand_mitigations:
+        mode_info.append("mitigation-expansion")
 
     mode_str = ", ".join(mode_info) if mode_info else "default"
     console.print(f"[dim]Initializing knowledge graph and LLM (mode: {mode_str})...[/dim]")
@@ -473,6 +476,7 @@ def analyze(
         use_toon=toon,
         use_bm25=hybrid,
         use_kill_chain=kill_chain,
+        expand_by_mitigation=expand_mitigations,
     )
 
     # Run analysis

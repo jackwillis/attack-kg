@@ -329,6 +329,23 @@ class AttackGraph:
             for r in results
         ]
 
+    def get_techniques_for_mitigation(self, mitigation_id: str) -> list[dict[str, str]]:
+        """Get techniques that a mitigation addresses."""
+        mit_uri = f"<https://attack.mitre.org/mitigation/{mitigation_id}>"
+        sparql = f"""
+        PREFIX attack: <https://attack.mitre.org/>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+        SELECT ?attackId ?name WHERE {{
+            {mit_uri} attack:mitigates ?technique .
+            ?technique a attack:Technique ;
+                       attack:attackId ?attackId ;
+                       rdfs:label ?name .
+        }}
+        ORDER BY ?attackId
+        """
+        return [{"attack_id": r["attackId"], "name": r["name"]} for r in self.query(sparql)]
+
     def get_software_using_technique(self, attack_id: str) -> list[dict[str, str]]:
         """Get software (malware/tools) that use a specific technique."""
         tech_uri = f"<https://attack.mitre.org/technique/{attack_id}>"
