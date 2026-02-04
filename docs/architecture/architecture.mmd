@@ -1,8 +1,12 @@
 %%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4A90A4', 'secondaryColor': '#E8F4F8', 'tertiaryColor': '#F5F5F5', 'primaryTextColor': '#333', 'lineColor': '#666'}}}%%
 
 flowchart TB
-    subgraph External["External Data Source"]
+    subgraph External["External Data Sources"]
+        direction TB
         MITRE["MITRE ATT&CK<br/>GitHub Repository"]
+        D3FEND["MITRE D3FEND<br/>Defensive Ontology"]
+        LOLBAS["LOLBAS<br/>Windows LOLBins"]
+        GTFO["GTFOBins<br/>Linux Binaries"]
     end
 
     subgraph Ingestion["Data Ingestion Pipeline"]
@@ -16,8 +20,14 @@ flowchart TB
             P2["Pass 2: Relationships<br/><i>uses, mitigates, subtechniqueOf,<br/>detects, attributedTo, targets</i>"]
         end
 
+        subgraph ExtParsers["External Source Parsers"]
+            direction LR
+            LB["lolbas.py<br/><i>YAML parsing</i>"]
+            GT["gtfobins.py<br/><i>Markdown parsing</i>"]
+        end
+
         RDF["attack.nt<br/><i>RDF N-Triples<br/>(52K+ triples)</i>"]
-        EMB["embeddings.py<br/><i>sentence-transformers<br/>nomic-embed-text-v1.5</i>"]
+        EMB["embeddings.py<br/><i>sentence-transformers<br/>nomic-embed-text-v1.5<br/>+LOLBAS/GTFOBins</i>"]
     end
 
     subgraph Storage["Persistent Storage Layer"]
@@ -29,15 +39,16 @@ flowchart TB
     subgraph Store["Store Module"]
         direction LR
         AG["AttackGraph<br/><i>graph.py</i><br/>SPARQL queries,<br/>Mitigation inheritance"]
-        SS["SemanticSearch<br/><i>vectors.py</i>"]
+        SS["SemanticSearch<br/><i>semantic.py</i>"]
     end
 
     subgraph Query["Query Module"]
         direction TB
         SEM["SemanticSearchEngine<br/><i>semantic.py</i><br/>Vector Similarity"]
+        KW["KeywordSearchEngine<br/><i>keyword.py</i><br/>BM25 Search"]
         SPARQL["QueryTemplates<br/><i>sparql.py</i><br/>20+ SPARQL patterns"]
 
-        HYB["HybridQueryEngine<br/><i>hybrid.py</i><br/><b>Neuro-Symbolic Core</b>"]
+        HYB["HybridQueryEngine<br/><i>hybrid.py</i><br/><b>Neuro-Symbolic Core</b><br/>RRF Fusion + Kill Chain"]
     end
 
     subgraph Reasoning["Reasoning Module"]
@@ -47,7 +58,12 @@ flowchart TB
             OLLAMA["OllamaBackend<br/><i>Local LLM</i>"]
             OPENAI["OpenAIBackend<br/><i>Cloud LLM</i>"]
         end
-        ANALYZER["AttackAnalyzer<br/><i>analyzer.py</i><br/>Attack Narratives +<br/>Vulnerability Findings,<br/>Classification, Remediation"]
+        subgraph TwoStage["Two-Stage Pipeline"]
+            direction LR
+            SELECTOR["NodeSelector<br/><i>Stage 1</i><br/>Technique Selection"]
+            REMEDIATOR["RemediationWriter<br/><i>Stage 2</i><br/>Remediation Guidance"]
+        end
+        ANALYZER["AttackAnalyzer<br/><i>analyzer.py</i><br/>Orchestrates Pipeline"]
     end
 
     subgraph Interface["User Interface"]
@@ -57,12 +73,18 @@ flowchart TB
 
     %% Data Flow
     MITRE --> DL
+    D3FEND --> DL
+    LOLBAS --> DL
+    GTFO --> DL
     DL --> STIX
+    DL --> ExtParsers
     STIX --> Converter
     P1 --> P2
     Converter --> RDF
     RDF --> OXI
     STIX --> EMB
+    LB --> EMB
+    GT --> EMB
     EMB --> CHROMA
 
     %% Store connections
@@ -71,14 +93,18 @@ flowchart TB
 
     %% Query connections
     AG --> SPARQL
+    AG --> KW
     SS --> SEM
     SEM --> HYB
+    KW --> HYB
     SPARQL --> HYB
 
     %% Reasoning connections
     HYB --> ANALYZER
-    OLLAMA --> ANALYZER
-    OPENAI --> ANALYZER
+    SELECTOR --> REMEDIATOR
+    OLLAMA --> TwoStage
+    OPENAI --> TwoStage
+    ANALYZER --> TwoStage
 
     %% Interface connections
     ANALYZER --> CLI
@@ -93,7 +119,7 @@ flowchart TB
     classDef llm fill:#F8D7DA,stroke:#DC3545,stroke-width:2px
     classDef interface fill:#E2E3E5,stroke:#6C757D,stroke-width:2px
 
-    class MITRE external
+    class MITRE,D3FEND,LOLBAS,GTFO external
     class OXI,CHROMA storage
     class HYB core
     class OLLAMA,OPENAI,ANALYZER llm

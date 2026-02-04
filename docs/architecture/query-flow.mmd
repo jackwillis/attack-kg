@@ -7,6 +7,7 @@ sequenceDiagram
     participant HybridEngine as HybridQueryEngine
     participant Semantic as SemanticSearchEngine
     participant ChromaDB
+    participant Keyword as KeywordSearchEngine
     participant Graph as AttackGraph
     participant Oxigraph
     participant LLM as AttackAnalyzer + LLM
@@ -15,11 +16,15 @@ sequenceDiagram
     CLI->>HybridEngine: query(finding_text, top_k=5)
 
     rect rgb(232, 244, 248)
-        Note over HybridEngine,ChromaDB: Neural Component - Semantic Search
+        Note over HybridEngine,Keyword: Hybrid Retrieval - RRF Fusion<br/>(ATT&CK + LOLBAS + GTFOBins)
         HybridEngine->>Semantic: search(finding_text)
-        Semantic->>ChromaDB: query(embedding, n_results=5)
-        ChromaDB-->>Semantic: candidate techniques + similarity scores
+        Semantic->>ChromaDB: query(embedding, n_results=10)
+        ChromaDB-->>Semantic: semantic candidates + similarity scores<br/>+ tool→technique mappings (certutil→T1105)
         Semantic-->>HybridEngine: SemanticResult[]
+        HybridEngine->>Keyword: search(finding_text)
+        Keyword-->>HybridEngine: KeywordResult[] (BM25 scores)
+        Note over HybridEngine: Reciprocal Rank Fusion<br/>score(d) = Σ 1/(60 + rank)
+        HybridEngine->>HybridEngine: Fuse results, take top_k
     end
 
     rect rgb(212, 237, 218)
@@ -39,14 +44,32 @@ sequenceDiagram
 
     HybridEngine-->>CLI: EnrichedTechnique[]
 
-    rect rgb(248, 215, 218)
-        Note over CLI,LLM: LLM Reasoning
-        CLI->>LLM: analyze(finding_text, candidates)
-        Note right of LLM: Handles both:<br/>- Attack narratives<br/>- Vulnerability findings<br/><br/>Context includes:<br/>- Platforms, Groups<br/>- Campaigns, Data Sources<br/>- Inherited mitigations
-        LLM->>LLM: classify techniques (observed or potential)
-        LLM->>LLM: generate remediation
-        LLM->>LLM: recommend detection
-        LLM-->>CLI: AnalysisResult
+    rect rgb(255, 243, 205)
+        Note over CLI,LLM: Stage 1: Node Selection (LLM)
+        CLI->>LLM: NodeSelector.select(finding, candidates)
+        Note right of LLM: Task: Which candidates apply?<br/>Output: IDs only (no hallucination)<br/>+ confidence scores<br/>+ evidence from finding text
+        LLM-->>CLI: selected_ids[] + evidence[]
+        CLI->>CLI: Validate IDs against candidates
+        CLI->>CLI: Rehydrate names from graph
     end
 
-    CLI-->>User: Techniques, Mitigations,<br/>Detection Recommendations,<br/>Kill Chain Analysis
+    rect rgb(212, 237, 218)
+        Note over CLI,Oxigraph: Graph Enrichment
+        CLI->>Graph: get_mitigations_with_inheritance(technique_ids)
+        Graph->>Oxigraph: SPARQL (includes parent technique mitigations)
+        Oxigraph-->>Graph: mitigations[]
+        CLI->>Graph: get_d3fend_for_techniques(technique_ids)
+        Graph->>Oxigraph: SPARQL (D3FEND via mitigation links)
+        Oxigraph-->>Graph: d3fend_techniques[]
+    end
+
+    rect rgb(248, 215, 218)
+        Note over CLI,LLM: Stage 2: Remediation Writing (LLM)
+        CLI->>LLM: RemediationWriter.write(finding, techniques, mitigations, d3fend)
+        Note right of LLM: Task: How to fix these issues?<br/>Constrained to provided mitigations<br/>Context-aware implementation<br/>No invented product names
+        LLM-->>CLI: prioritized_mitigations[] + implementation_steps[]
+        CLI->>CLI: Validate mitigation IDs
+        CLI->>CLI: Rehydrate names from graph
+    end
+
+    CLI-->>User: Techniques (validated),<br/>Mitigations (prioritized),<br/>D3FEND Countermeasures,<br/>Kill Chain Analysis

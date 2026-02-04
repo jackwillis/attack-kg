@@ -3,9 +3,10 @@
 sequenceDiagram
     autonumber
     participant User
-    participant CLI as CLI (cli.py)
+    participant CLI as CLI (main.py)
     participant Hybrid as HybridQueryEngine
     participant Vectors as ChromaDB
+    participant BM25 as KeywordSearchEngine
     participant Graph as Oxigraph
     participant LLM as LLM Backend
 
@@ -15,11 +16,13 @@ sequenceDiagram
     CLI->>Hybrid: query(narrative, top_k=10)
 
     rect rgb(230, 245, 255)
-        Note over Hybrid,Vectors: Step 1: Neural Search (Vector Similarity)
+        Note over Hybrid,BM25: Step 1: Hybrid Retrieval (RRF Fusion)<br/>Includes ATT&CK + LOLBAS + GTFOBins
         Hybrid->>Vectors: embed(narrative)
-        Vectors-->>Hybrid: embedding vector
-        Hybrid->>Vectors: search(vector, top_k=10)
-        Vectors-->>Hybrid: candidates [T1110.003, T1078, ...]
+        Vectors-->>Hybrid: semantic candidates + similarity scores
+        Hybrid->>BM25: tokenize + search(narrative)
+        BM25-->>Hybrid: keyword candidates + BM25 scores
+        Note over Hybrid: Reciprocal Rank Fusion<br/>score = Σ 1/(k + rank)
+        Hybrid-->>Hybrid: fused candidates [T1110.003, T1078, ...]
     end
 
     rect rgb(255, 245, 230)
@@ -39,11 +42,17 @@ sequenceDiagram
     Hybrid-->>CLI: EnrichedTechnique[]
 
     rect rgb(255, 230, 230)
-        Note over CLI,LLM: Step 3: LLM Reasoning
-        CLI->>LLM: classify(narrative, candidates)
-        LLM-->>CLI: confidence scores + evidence
-        CLI->>LLM: generate_remediations(techniques)
-        LLM-->>CLI: RemediationItem[]
+        Note over CLI,LLM: Step 3: Two-Stage LLM Reasoning
+        CLI->>LLM: Stage 1: NodeSelector(narrative, candidates)
+        Note right of LLM: Select techniques that apply<br/>Output: IDs only (no hallucination)<br/>Validate IDs against candidates
+        LLM-->>CLI: selected_ids[] + confidence + evidence
+        CLI->>CLI: Rehydrate names/tactics from graph
+        CLI->>Graph: Enrich with mitigations, D3FEND
+        Graph-->>CLI: mitigations[], d3fend_techniques[]
+        CLI->>LLM: Stage 2: RemediationWriter(techniques, mitigations)
+        Note right of LLM: Generate implementation guidance<br/>Output: mitigation IDs + priority<br/>Constrained to provided options
+        LLM-->>CLI: prioritized_mitigation_ids[]
+        CLI->>CLI: Rehydrate mitigation names from graph
     end
 
-    CLI-->>User: AnalysisResult<br/>{techniques, remediations}
+    CLI-->>User: AnalysisResult<br/>{techniques, remediations, d3fend}
