@@ -402,6 +402,13 @@ The system uses multiple strategies to reduce LLM hallucinations:
 3. **Constrained Selection**: Stage 1 prompt explicitly restricts selection to provided candidates
 4. **Evidence Extraction**: LLM must cite specific text from the finding as evidence
 
+## Roadmap / TODO
+
+- [ ] **CVE Database Integration**: Add NVD (National Vulnerability Database) data to the vector store to improve vulnerability→technique retrieval. Options include:
+  - CWE→CAPEC→ATT&CK mapping chains (MITRE maintains these)
+  - CVE description embeddings for semantic similarity to ATT&CK techniques
+  - CISA KEV (Known Exploited Vulnerabilities) with TTP mappings
+
 ## License
 
 This project is licensed under the **MIT License** - see [LICENSE](LICENSE) for details.

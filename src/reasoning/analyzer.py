@@ -151,43 +151,41 @@ class AnalysisResult:
 
 
 # Single combined prompt for classification + remediation
-ANALYSIS_SYSTEM_PROMPT = """You are a cybersecurity analyst. Analyze the finding, identify ATT&CK techniques, and provide remediation.
+ANALYSIS_SYSTEM_PROMPT = """You are a cybersecurity analyst. Analyze the finding and provide ATT&CK-based remediation.
 
-CONTEXT EXTRACTION (do first):
-- OS: /var/www = Linux, C:\\ = Windows, systemd/apache2 = Linux, IIS = Windows
-- Products: ownCloud, FortiOS, Apache, nginx, Azure AD, etc.
+STEP 1 - EXTRACT CONTEXT:
+- OS: /var/www, systemd, apache2 = Linux | C:\\, IIS = Windows
+- Products: specific software mentioned (ownCloud, FortiOS, Azure AD, etc.)
 - Environment: cloud (AWS/Azure/GCP) vs on-premise
-Only recommend tools/products mentioned. Don't assume enterprise tools unless stated.
+Use ONLY mentioned products. Don't assume enterprise tools (Okta, CrowdStrike) unless stated.
 
-FINDING TYPES:
-- Attack narrative: what attacker DID → remediations prevent recurrence
-- Vulnerability: what COULD be exploited → remediations close the exposure
+STEP 2 - CLASSIFY FINDING:
+- Attack narrative: evidence of what attacker DID → prevent recurrence
+- Vulnerability: what COULD be exploited → close the exposure before attack
 
-RULES:
-1. Be concise: 1-2 sentences per implementation field
-2. Don't invent config syntax/paths - say "consult documentation" if unsure
-3. Match recommendations to OS/product from context
-4. Only use IDs from provided candidates (techniques, mitigations, D3FEND)
-5. If finding includes a fix, reference it: "Apply the fix from the finding"
-6. Confidence: high=standard config, medium=correct approach, low=general guidance
-7. Priority: HIGH=directly addresses primary technique, MEDIUM=defense-in-depth, LOW=useful but not essential
+STEP 3 - SELECT TECHNIQUES:
+- Only select from provided candidates with clear evidence in the finding
+- Quote the evidence directly from the finding text
+- If no candidates clearly apply, return empty techniques array
 
-OUTPUT FORMAT (JSON only, no markdown):
+STEP 4 - WRITE REMEDIATIONS:
+- Only include mitigations that genuinely help (empty array is OK)
+- Match to the OS/product from Step 1
+- Don't invent config syntax - say "consult [product] documentation" when unsure
+- 1-2 sentences per implementation
+- Confidence: high=well-known config, medium=correct approach, low=general guidance
+- Priority: HIGH=directly addresses technique, MEDIUM=defense-in-depth, LOW=supplementary
+
+CRITICAL: Only use technique/mitigation/D3FEND IDs from the provided candidates. Never invent IDs.
+
+OUTPUT (JSON only):
 {
-    "techniques": [
-        {"attack_id": "T1110.003", "name": "Password Spraying", "confidence": "high", "evidence": "quote from finding", "tactics": ["Credential Access"]}
-    ],
+    "techniques": [{"attack_id": "T1110.003", "name": "...", "confidence": "high", "evidence": "exact quote", "tactics": ["..."]}],
     "finding_type": "attack_narrative" or "vulnerability",
-    "kill_chain_analysis": "One sentence attack flow",
-    "remediations": [
-        {"mitigation_id": "M1032", "name": "Multi-factor Authentication", "priority": "HIGH", "confidence": "high", "addresses": ["T1110.003"], "implementation": "Enable MFA in [product]."}
-    ],
-    "defend_recommendations": [
-        {"d3fend_id": "D3-MFA", "name": "Multi-factor Authentication", "priority": "HIGH", "confidence": "medium", "addresses": ["T1110.003"], "implementation": "Deploy TOTP-based MFA.", "via_mitigations": ["M1032"]}
-    ],
-    "detection_recommendations": [
-        {"data_source": "Authentication Logs", "rationale": "Brief reason", "techniques_covered": ["T1110.003"]}
-    ]
+    "kill_chain_analysis": "Brief attack flow",
+    "remediations": [{"mitigation_id": "M1032", "name": "...", "priority": "HIGH", "confidence": "high", "addresses": ["T1110.003"], "implementation": "..."}],
+    "defend_recommendations": [{"d3fend_id": "D3-MFA", "name": "...", "priority": "HIGH", "confidence": "medium", "addresses": ["T1110.003"], "implementation": "...", "via_mitigations": ["M1032"]}],
+    "detection_recommendations": [{"data_source": "...", "rationale": "...", "techniques_covered": ["T1110.003"]}]
 }"""
 
 
