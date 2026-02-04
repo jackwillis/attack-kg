@@ -76,38 +76,20 @@ For D3FEND Techniques:
 OUTPUT FORMAT
 ═══════════════════════════════════════════════════════════════════════════════
 
-Output JSON with this exact structure:
+Output JSON with IDs and implementation only (names will be looked up):
 {
     "remediations": [
-        {
-            "mitigation_id": "M1032",
-            "name": "Multi-factor Authentication",
-            "priority": "HIGH",
-            "addresses": ["T1110.003"],
-            "implementation": "1. Enable [product]'s built-in 2FA feature. 2. Require 2FA for admin accounts. 3. Configure via Admin > Security settings."
-        }
+        {"id": "M1032", "priority": "HIGH", "addresses": ["T1110.003"], "implementation": "1. Enable 2FA. 2. Require for admin accounts."}
     ],
-    "defend_recommendations": [
-        {
-            "d3fend_id": "D3-MFA",
-            "name": "Multi-factor Authentication",
-            "priority": "HIGH",
-            "addresses": ["T1110.003"],
-            "implementation": "Deploy TOTP-based MFA using [product]'s native 2FA module.",
-            "via_mitigations": ["M1032"]
-        }
+    "defend": [
+        {"id": "D3-MFA", "priority": "HIGH", "addresses": ["T1110.003"], "implementation": "Deploy TOTP-based MFA.", "via": ["M1032"]}
     ],
-    "detection_recommendations": [
-        {
-            "data_source": "Authentication Logs",
-            "rationale": "Why this helps detect the identified techniques",
-            "techniques_covered": ["T1110.003"]
-        }
+    "detection": [
+        {"source": "Authentication Logs", "rationale": "Detects repeated failed logins", "covers": ["T1110.003"]}
     ]
 }
 
-CONSISTENCY RULE: The "addresses" and "techniques_covered" fields must ONLY contain
-technique IDs that were selected in Stage 1. Do not reference techniques not selected.
+CONSISTENCY RULE: "addresses" and "covers" must ONLY contain technique IDs from Stage 1.
 
 IMPORTANT: Only output valid JSON. No markdown, no explanation outside JSON."""
 
@@ -152,6 +134,32 @@ class RemediationResult:
     defend_recommendations: list[D3FendRecommendation]
     detection_recommendations: list[DetectionRecommendation]
     raw_response: dict[str, Any] = field(default_factory=dict)
+
+    def rehydrate(self, graph) -> "RemediationResult":
+        """
+        Rehydrate remediation items with names from the knowledge graph.
+
+        Args:
+            graph: AttackGraph instance for lookups
+
+        Returns:
+            Self for chaining
+        """
+        # Rehydrate mitigation names
+        for rem in self.remediations:
+            if not rem.name:
+                mit_data = graph.get_mitigation(rem.mitigation_id)
+                if mit_data:
+                    rem.name = mit_data.get("name", "")
+
+        # Rehydrate D3FEND names
+        for d3f in self.defend_recommendations:
+            if not d3f.name:
+                d3f_data = graph.get_d3fend_technique(d3f.d3fend_id)
+                if d3f_data:
+                    d3f.name = d3f_data.get("name", "")
+
+        return self
 
 
 class RemediationWriter:
@@ -223,10 +231,10 @@ Prioritize mitigations by impact and include D3FEND recommendations where applic
         # Validate and filter responses
         selected_set = set(selected_technique_ids)
 
-        # Process remediations
+        # Process remediations (support both new "id" and legacy "mitigation_id")
         remediations = []
         for rem in result.get("remediations", []):
-            mit_id = rem.get("mitigation_id", "")
+            mit_id = rem.get("id", rem.get("mitigation_id", ""))
             if mit_id not in valid_mitigation_ids:
                 console.print(f"[yellow]Stage 2: Filtered invalid mitigation: {mit_id}[/yellow]")
                 continue
@@ -238,16 +246,17 @@ Prioritize mitigations by impact and include D3FEND recommendations where applic
 
             remediations.append(RemediationItem(
                 mitigation_id=mit_id,
-                name=rem.get("name", ""),
+                name=rem.get("name", ""),  # Will be rehydrated if empty
                 priority=rem.get("priority", "MEDIUM"),
                 addresses=addresses,
                 implementation=rem.get("implementation", ""),
             ))
 
-        # Process D3FEND recommendations
+        # Process D3FEND recommendations (support both new "id"/"via" and legacy formats)
         defend_recs = []
-        for d3f in result.get("defend_recommendations", []):
-            d3f_id = d3f.get("d3fend_id", "")
+        raw_defend = result.get("defend", result.get("defend_recommendations", []))
+        for d3f in raw_defend:
+            d3f_id = d3f.get("id", d3f.get("d3fend_id", ""))
             if d3f_id not in valid_d3fend_ids:
                 console.print(f"[yellow]Stage 2: Filtered invalid D3FEND: {d3f_id}[/yellow]")
                 continue
@@ -257,26 +266,29 @@ Prioritize mitigations by impact and include D3FEND recommendations where applic
             if not addresses:
                 continue
 
-            # Filter via_mitigations to valid ones
-            via_mits = [m for m in d3f.get("via_mitigations", []) if m in valid_mitigation_ids]
+            # Filter via_mitigations to valid ones (support both "via" and "via_mitigations")
+            via_mits = d3f.get("via", d3f.get("via_mitigations", []))
+            via_mits = [m for m in via_mits if m in valid_mitigation_ids]
 
             defend_recs.append(D3FendRecommendation(
                 d3fend_id=d3f_id,
-                name=d3f.get("name", ""),
+                name=d3f.get("name", ""),  # Will be rehydrated if empty
                 priority=d3f.get("priority", "MEDIUM"),
                 addresses=addresses,
                 implementation=d3f.get("implementation", ""),
                 via_mitigations=via_mits,
             ))
 
-        # Process detection recommendations
+        # Process detection recommendations (support both new and legacy formats)
         detection_recs = []
-        for det in result.get("detection_recommendations", []):
-            # Filter techniques_covered to only selected techniques
-            covered = [t for t in det.get("techniques_covered", []) if t in selected_set]
+        raw_detection = result.get("detection", result.get("detection_recommendations", []))
+        for det in raw_detection:
+            # Support both "covers" and "techniques_covered"
+            covered = det.get("covers", det.get("techniques_covered", []))
+            covered = [t for t in covered if t in selected_set]
             if covered:
                 detection_recs.append(DetectionRecommendation(
-                    data_source=det.get("data_source", ""),
+                    data_source=det.get("source", det.get("data_source", "")),
                     rationale=det.get("rationale", ""),
                     techniques_covered=covered,
                 ))

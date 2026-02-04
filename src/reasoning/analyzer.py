@@ -522,6 +522,9 @@ Analyze this finding and provide:
             valid_d3fend_ids,
         )
 
+        # Rehydrate remediation names from the graph
+        remediation_result.rehydrate(self.hybrid.graph)
+
         # Build techniques list from Stage 1 selection (rehydrated with graph data)
         tech_lookup = {t.attack_id: t for t in hybrid_result.techniques}
         techniques = []

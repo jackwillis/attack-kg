@@ -221,6 +221,27 @@ class AttackGraph:
         """
         return [{"attack_id": r["attackId"], "name": r["name"]} for r in self.query(sparql)]
 
+    def get_mitigation(self, attack_id: str) -> dict[str, Any] | None:
+        """Get a mitigation by its ATT&CK ID (e.g., M1032)."""
+        mit_uri = f"<https://attack.mitre.org/mitigation/{attack_id}>"
+        sparql = f"""
+        PREFIX attack: <https://attack.mitre.org/>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+        SELECT ?name ?description WHERE {{
+            {mit_uri} rdfs:label ?name .
+            OPTIONAL {{ {mit_uri} attack:description ?description }}
+        }}
+        """
+        results = self.query(sparql)
+        if results:
+            return {
+                "attack_id": attack_id,
+                "name": results[0].get("name", ""),
+                "description": results[0].get("description", ""),
+            }
+        return None
+
     def get_mitigations_for_technique(self, attack_id: str) -> list[dict[str, str]]:
         """Get mitigations for a specific technique."""
         tech_uri = f"<https://attack.mitre.org/technique/{attack_id}>"
