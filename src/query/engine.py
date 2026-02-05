@@ -12,12 +12,66 @@ from rich.console import Console
 from src.store.graph import AttackGraph
 from src.query.semantic import SemanticSearch, SemanticResult
 from src.query.keyword import KeywordSearch
+from src.query.router import FindingType, route_finding
 
 console = Console()
 
 # CVE/CWE pattern detection
 CVE_PATTERN = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.IGNORECASE)
 CWE_PATTERN = re.compile(r"\bCWE-\d{1,4}\b", re.IGNORECASE)
+
+# Vulnerability keyword → ATT&CK technique mapping
+# (compiled regex, list of technique IDs)
+VULN_KEYWORD_TECHNIQUES: list[tuple[re.Pattern, list[str]]] = [
+    # Authentication / credential attacks
+    (re.compile(r"\bauthentication bypass\b", re.I), ["T1190", "T1556"]),
+    (re.compile(r"\bbrute.?force\b", re.I), ["T1110"]),
+    (re.compile(r"\bcredential.?stuff(?:ing)?\b", re.I), ["T1110.004"]),
+    (re.compile(r"\bpassword spray(?:ing)?\b", re.I), ["T1110.003"]),
+    (re.compile(r"\bdefault.?(?:credential|password)\b", re.I), ["T1078.001"]),
+    (re.compile(r"\bsession.?(?:fixation|hijack)\b", re.I), ["T1550.004"]),
+    (re.compile(r"\btoken.?(?:theft|forgery|replay)\b", re.I), ["T1528"]),
+    # Injection / code execution
+    (re.compile(r"\bremote code execution|RCE\b", re.I), ["T1190", "T1203"]),
+    (re.compile(r"\bSQL.?injection\b", re.I), ["T1190"]),
+    (re.compile(r"\bcommand.?injection\b", re.I), ["T1059"]),
+    (re.compile(r"\bcode.?injection\b", re.I), ["T1055"]),
+    (re.compile(r"\bXSS|cross.?site.?script\b", re.I), ["T1059.007"]),
+    (re.compile(r"\bdeserialization\b", re.I), ["T1190"]),
+    (re.compile(r"\btemplate.?injection\b", re.I), ["T1221"]),
+    (re.compile(r"\bSSRF|server.?side.?request\b", re.I), ["T1090"]),
+    # Buffer / memory
+    (re.compile(r"\bbuffer.?overflow\b", re.I), ["T1190", "T1203"]),
+    (re.compile(r"\bheap.?overflow\b", re.I), ["T1203"]),
+    (re.compile(r"\buse.?after.?free\b", re.I), ["T1203"]),
+    # Privilege escalation
+    (re.compile(r"\bprivilege.?escalation|privesc\b", re.I), ["T1068"]),
+    (re.compile(r"\bSUID|setuid\b", re.I), ["T1548.001"]),
+    # File / path
+    (re.compile(r"\bpath.?traversal|directory.?traversal\b", re.I), ["T1083"]),
+    (re.compile(r"\bfile.?(?:upload|inclusion)\b", re.I), ["T1190"]),
+    (re.compile(r"\bLFI|RFI\b"), ["T1190"]),
+    # Misconfiguration
+    (re.compile(r"\bmisconfigur(?:ation|ed)\b", re.I), ["T1574"]),
+    (re.compile(r"\bopen.?redirect\b", re.I), ["T1189"]),
+    (re.compile(r"\binsecure.?(?:default|permission|config)\b", re.I), ["T1574"]),
+    (re.compile(r"\bexposed.?(?:service|port|endpoint|interface|api)\b", re.I), ["T1190"]),
+    # Cloud-specific
+    (re.compile(r"\bIAM.?misconfigur\b", re.I), ["T1078", "T1098"]),
+    (re.compile(r"\bS3.?bucket.?(?:exposed|public|open)\b", re.I), ["T1530"]),
+    (re.compile(r"\b(?:metadata.?service|IMDS)\b", re.I), ["T1552.005"]),
+    # Container/K8s
+    (re.compile(r"\bcontainer.?escape\b", re.I), ["T1611"]),
+    (re.compile(r"\bprivileged.?container\b", re.I), ["T1611"]),
+    # Cryptographic
+    (re.compile(r"\bweak.?(?:encryption|cipher)\b", re.I), ["T1573"]),
+    (re.compile(r"\bcertificate.?(?:validation|verify|bypass)\b", re.I), ["T1553.004"]),
+    # Data exposure
+    (re.compile(r"\binformation.?(?:disclosure|leak(?:age)?)\b", re.I), ["T1005"]),
+    (re.compile(r"\bsensitive.?data.?(?:exposed|exposure)\b", re.I), ["T1005"]),
+    # Denial of service
+    (re.compile(r"\bdenial.?of.?service|DoS\b", re.I), ["T1499"]),
+]
 
 
 @dataclass
@@ -70,6 +124,19 @@ class HybridQueryEngine:
         self, question: str, top_k: int = 5, enrich: bool = True,
         use_bm25: bool = True, use_cooccurrence: bool = True,
     ) -> QueryResult:
+        # Step 0: Route finding type
+        routing = route_finding(question)
+        is_vuln = routing.finding_type == FindingType.VULNERABILITY
+
+        # Adjust parameters based on finding type
+        if is_vuln:
+            use_cooccurrence = False
+            cwe_boost = 2.0
+            vuln_kw_boost = 1.8
+        else:
+            cwe_boost = 1.4
+            vuln_kw_boost = 1.3
+
         # Step 1: Semantic search (2x candidates)
         n = top_k * 2 if use_bm25 else top_k
         sem_results = self.semantic.search(question, top_k=n)
@@ -95,7 +162,14 @@ class HybridQueryEngine:
         # Step 4b: CWE/CVE-based technique injection
         cwe_techniques = self._extract_cwe_techniques(question)
         if cwe_techniques:
-            combined = self._inject_cwe_techniques(combined, cwe_techniques)
+            combined = self._inject_cwe_techniques(combined, cwe_techniques, boost=cwe_boost)
+
+        # Step 4c: Vulnerability keyword technique injection
+        combined = self._inject_vuln_techniques(combined, question, boost=vuln_kw_boost)
+
+        # Step 4d: Platform-aware boosting
+        if routing.platforms:
+            combined = self._boost_platform_match(combined, routing.platforms)
 
         # Step 5: Take top_k and enrich
         top = combined[:top_k]
@@ -115,8 +189,13 @@ class HybridQueryEngine:
             mode += "+cooccurrence"
         if cwe_techniques:
             mode += "+cwe"
-        return QueryResult(query=question, techniques=techniques,
-                           metadata={"top_k": top_k, "mode": mode, "count": len(techniques)})
+        metadata = {
+            "top_k": top_k, "mode": mode, "count": len(techniques),
+            "finding_type": routing.finding_type.value,
+            "routing_confidence": routing.confidence,
+            "routing_signals": routing.signals,
+        }
+        return QueryResult(query=question, techniques=techniques, metadata=metadata)
 
     def _rrf(self, sem: list[SemanticResult], kw: list, k: int = 60) -> list[dict]:
         scores: dict[str, float] = {}
@@ -229,6 +308,47 @@ class HybridQueryEngine:
                     "rrf_score": 0.01 * boost,  # Low base, but boosted
                     "cwe_boost": True,
                 })
+        combined.sort(key=lambda x: x.get("rrf_score", 0), reverse=True)
+        return combined
+
+    def _inject_vuln_techniques(
+        self, combined: list[dict], text: str, boost: float = 1.3,
+    ) -> list[dict]:
+        """Inject techniques matched by vulnerability keyword patterns."""
+        matched_ids: set[str] = set()
+        for pattern, tech_ids in VULN_KEYWORD_TECHNIQUES:
+            if pattern.search(text):
+                matched_ids.update(tech_ids)
+        if not matched_ids:
+            return combined
+        existing = {item["attack_id"] for item in combined}
+        for aid in matched_ids:
+            if aid in existing:
+                for item in combined:
+                    if item["attack_id"] == aid:
+                        item["rrf_score"] = item.get("rrf_score", 0) * boost
+                        item["vuln_kw_boost"] = True
+                        break
+            else:
+                combined.append({
+                    "attack_id": aid, "name": "",
+                    "tactics": [], "platforms": [],
+                    "rrf_score": 0.01 * boost,
+                    "vuln_kw_boost": True,
+                })
+        combined.sort(key=lambda x: x.get("rrf_score", 0), reverse=True)
+        return combined
+
+    def _boost_platform_match(
+        self, combined: list[dict], platforms: list[str], boost: float = 1.2,
+    ) -> list[dict]:
+        """Boost candidates whose platforms overlap with detected platforms."""
+        platform_set = set(platforms)
+        for item in combined:
+            item_platforms = set(item.get("platforms", []))
+            if item_platforms & platform_set:
+                item["rrf_score"] = item.get("rrf_score", 0) * boost
+                item["platform_boost"] = True
         combined.sort(key=lambda x: x.get("rrf_score", 0), reverse=True)
         return combined
 

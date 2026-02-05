@@ -164,6 +164,15 @@ class AttackAnalyzer:
                 kill_chain="", filtered_ids={"error": [raw.get("error", "")]},
             )
 
+        # Step 3b: Log routing vs LLM finding type mismatch
+        llm_finding_type = raw.get("finding_type", "attack_narrative")
+        router_finding_type = result.metadata.get("finding_type", "")
+        if router_finding_type and llm_finding_type != router_finding_type:
+            console.print(
+                f"[yellow]Router/LLM mismatch: router={router_finding_type}, "
+                f"llm={llm_finding_type}[/yellow]"
+            )
+
         # Step 4: Validate (filter hallucinated IDs)
         filtered = {"techniques": [], "mitigations": [], "d3fend": []}
 

@@ -19,8 +19,10 @@ class SemanticResult:
 class SemanticSearch:
     """ChromaDB-backed semantic search."""
 
-    def __init__(self, vector_path: Path | str, model: str = "nomic-ai/nomic-embed-text-v1.5"):
-        from src.ingest.embeddings import EmbeddingGenerator, VectorStore
+    def __init__(self, vector_path: Path | str, model: str | None = None):
+        from src.ingest.embeddings import DEFAULT_MODEL, EmbeddingGenerator, VectorStore
+        if model is None:
+            model = DEFAULT_MODEL
         self.embedder = EmbeddingGenerator(model)
         self.store = VectorStore(vector_path)
 

@@ -8,13 +8,14 @@ from rich.console import Console
 
 console = Console()
 
+DEFAULT_MODEL = "basel/ATTACK-BERT"
 NOMIC_REVISION = "e5cf08aadaa33385f5990def41f7a23405aec398"
 
 
 class EmbeddingGenerator:
     """Sentence-transformers embedding model with offline support."""
 
-    def __init__(self, model: str = "nomic-ai/nomic-embed-text-v1.5"):
+    def __init__(self, model: str = DEFAULT_MODEL):
         self.model_name = model
         self._revision = NOMIC_REVISION if "nomic" in model else None
         self._offline = os.environ.get("ATTACK_KG_OFFLINE", "").lower() in ("1", "true")

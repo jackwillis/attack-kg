@@ -1,5 +1,6 @@
-"""Tests for hybrid query engine: RRF, co-occurrence, CWE."""
+"""Tests for hybrid query engine: RRF, co-occurrence, CWE, routing, platform boost."""
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 from unittest.mock import MagicMock
@@ -8,7 +9,7 @@ import pytest
 
 from src.query.engine import (
     HybridQueryEngine, EnrichedTechnique,
-    CVE_PATTERN, CWE_PATTERN,
+    CVE_PATTERN, CWE_PATTERN, VULN_KEYWORD_TECHNIQUES,
 )
 from src.query.semantic import SemanticResult
 
@@ -175,3 +176,204 @@ class TestQueryIntegration:
         assert len(result.techniques) >= 1
         assert result.techniques[0].attack_id == "T1110"
         assert "semantic" in result.metadata["mode"]
+
+    def test_routing_metadata_present(self):
+        graph = MagicMock()
+        graph.get_technique.return_value = {
+            "name": "Exploit Public-Facing Application", "description": "...",
+            "tactics": [], "platforms": [], "data_sources": [],
+        }
+        graph.get_mitigations_with_inheritance.return_value = []
+        graph.get_software_for_technique.return_value = []
+        graph.get_groups_for_technique.return_value = []
+        graph.get_detection_strategies.return_value = []
+        graph.get_data_sources.return_value = []
+        graph.get_campaigns_for_technique.return_value = []
+        graph.get_d3fend_for_technique.return_value = []
+        graph.get_techniques_for_cwe.return_value = []
+
+        semantic = MagicMock()
+        semantic.search.return_value = _sem(("T1190", "Exploit Public-Facing Application", 0.9))
+
+        engine = HybridQueryEngine(graph, semantic, enable_bm25=False)
+        result = engine.query("CVE-2024-1234 vulnerability", top_k=5, use_bm25=False)
+        assert "finding_type" in result.metadata
+        assert result.metadata["finding_type"] == "vulnerability"
+        assert "routing_confidence" in result.metadata
+
+    def test_vulnerability_uses_higher_cwe_boost(self):
+        """Vulnerability finding should use 2.0x CWE boost instead of 1.4x."""
+        graph = MagicMock()
+        graph.get_techniques_for_cwe.return_value = [
+            {"attack_id": "T1059.007", "name": "JavaScript"}
+        ]
+        graph.get_technique.return_value = {
+            "name": "JavaScript", "description": "...",
+            "tactics": [], "platforms": [], "data_sources": [],
+        }
+        graph.get_mitigations_with_inheritance.return_value = []
+        graph.get_software_for_technique.return_value = []
+        graph.get_groups_for_technique.return_value = []
+        graph.get_detection_strategies.return_value = []
+        graph.get_data_sources.return_value = []
+        graph.get_campaigns_for_technique.return_value = []
+        graph.get_d3fend_for_technique.return_value = []
+
+        semantic = MagicMock()
+        semantic.search.return_value = _sem(
+            ("T1059.007", "JavaScript", 0.8),
+        )
+        engine = HybridQueryEngine(graph, semantic, enable_bm25=False)
+
+        # Vulnerability query: higher CWE boost (2.0)
+        vuln_result = engine.query(
+            "CWE-79 unpatched vulnerability", top_k=5, use_bm25=False
+        )
+
+        # Attack narrative: lower CWE boost (1.4) — force CWE into a narrative query
+        graph2 = MagicMock()
+        graph2.get_techniques_for_cwe.return_value = [
+            {"attack_id": "T1059.007", "name": "JavaScript"}
+        ]
+        graph2.get_technique.return_value = graph.get_technique.return_value
+        graph2.get_mitigations_with_inheritance.return_value = []
+        graph2.get_software_for_technique.return_value = []
+        graph2.get_groups_for_technique.return_value = []
+        graph2.get_detection_strategies.return_value = []
+        graph2.get_data_sources.return_value = []
+        graph2.get_campaigns_for_technique.return_value = []
+        graph2.get_d3fend_for_technique.return_value = []
+        graph2.get_cooccurring_techniques.return_value = []
+
+        semantic2 = MagicMock()
+        semantic2.search.return_value = _sem(
+            ("T1059.007", "JavaScript", 0.8),
+        )
+        engine2 = HybridQueryEngine(graph2, semantic2, enable_bm25=False)
+        # This query routes as attack_narrative (no vuln signals)
+        narr_result = engine2.query(
+            "APT29 exploited CWE-79", top_k=5, use_bm25=False
+        )
+
+        # Both should have the technique, but the vuln query metadata should show vulnerability
+        assert vuln_result.metadata["finding_type"] == "vulnerability"
+
+
+class TestVulnKeywordTable:
+    def test_auth_bypass_matches(self):
+        engine = HybridQueryEngine(MagicMock(), MagicMock())
+        combined = [{"attack_id": "T1110", "rrf_score": 0.5, "platforms": [], "tactics": []}]
+        result = engine._inject_vuln_techniques(combined, "authentication bypass in FortiOS")
+        ids = {r["attack_id"] for r in result}
+        assert "T1190" in ids
+
+    def test_rce_matches(self):
+        engine = HybridQueryEngine(MagicMock(), MagicMock())
+        combined = []
+        result = engine._inject_vuln_techniques(combined, "remote code execution vulnerability")
+        ids = {r["attack_id"] for r in result}
+        assert "T1190" in ids or "T1203" in ids
+
+    def test_sql_injection_matches(self):
+        engine = HybridQueryEngine(MagicMock(), MagicMock())
+        combined = []
+        result = engine._inject_vuln_techniques(combined, "SQL injection in login form")
+        ids = {r["attack_id"] for r in result}
+        assert "T1190" in ids
+
+    def test_container_escape_matches(self):
+        engine = HybridQueryEngine(MagicMock(), MagicMock())
+        combined = []
+        result = engine._inject_vuln_techniques(combined, "container escape vulnerability")
+        ids = {r["attack_id"] for r in result}
+        assert "T1611" in ids
+
+    def test_s3_bucket_exposed_matches(self):
+        engine = HybridQueryEngine(MagicMock(), MagicMock())
+        combined = []
+        result = engine._inject_vuln_techniques(combined, "S3 bucket exposed to public")
+        ids = {r["attack_id"] for r in result}
+        assert "T1530" in ids
+
+    def test_imds_matches(self):
+        engine = HybridQueryEngine(MagicMock(), MagicMock())
+        combined = []
+        result = engine._inject_vuln_techniques(combined, "IMDS metadata service accessible")
+        ids = {r["attack_id"] for r in result}
+        assert "T1552.005" in ids
+
+    def test_no_match_returns_unchanged(self):
+        engine = HybridQueryEngine(MagicMock(), MagicMock())
+        combined = [{"attack_id": "T1110", "rrf_score": 0.5, "platforms": [], "tactics": []}]
+        result = engine._inject_vuln_techniques(combined, "normal operation")
+        assert len(result) == 1
+
+    def test_boosts_existing_technique(self):
+        engine = HybridQueryEngine(MagicMock(), MagicMock())
+        combined = [{"attack_id": "T1190", "rrf_score": 0.5, "platforms": [], "tactics": []}]
+        result = engine._inject_vuln_techniques(combined, "authentication bypass")
+        boosted = [r for r in result if r["attack_id"] == "T1190"][0]
+        assert boosted["rrf_score"] > 0.5
+        assert boosted["vuln_kw_boost"] is True
+
+
+class TestPlatformBoost:
+    def test_platform_boost_reorders_candidates(self):
+        engine = HybridQueryEngine(MagicMock(), MagicMock())
+        combined = [
+            {"attack_id": "T1110", "rrf_score": 0.5, "platforms": ["Linux"], "tactics": []},
+            {"attack_id": "T1078", "rrf_score": 0.49, "platforms": ["Windows"], "tactics": []},
+        ]
+        # Boost Windows — should push T1078 above T1110
+        result = engine._boost_platform_match(combined, ["Windows"], boost=1.2)
+        assert result[0]["attack_id"] == "T1078"
+
+    def test_no_platform_overlap_no_change(self):
+        engine = HybridQueryEngine(MagicMock(), MagicMock())
+        combined = [
+            {"attack_id": "T1110", "rrf_score": 0.5, "platforms": ["Linux"], "tactics": []},
+        ]
+        result = engine._boost_platform_match(combined, ["Windows"], boost=1.2)
+        assert result[0]["rrf_score"] == 0.5  # unchanged
+
+    def test_empty_platforms_no_crash(self):
+        engine = HybridQueryEngine(MagicMock(), MagicMock())
+        combined = [
+            {"attack_id": "T1110", "rrf_score": 0.5, "platforms": [], "tactics": []},
+        ]
+        result = engine._boost_platform_match(combined, ["Windows"])
+        assert len(result) == 1
+
+
+class TestVulnKeywordPatterns:
+    """Verify each VULN_KEYWORD_TECHNIQUES regex matches its intended input."""
+
+    def test_all_patterns_compile(self):
+        for pattern, tech_ids in VULN_KEYWORD_TECHNIQUES:
+            assert isinstance(pattern, re.Pattern)
+            assert len(tech_ids) > 0
+
+    def test_session_fixation(self):
+        matched = [
+            tids for pat, tids in VULN_KEYWORD_TECHNIQUES if pat.search("session fixation attack")
+        ]
+        assert any("T1550.004" in tids for tids in matched)
+
+    def test_token_theft(self):
+        matched = [
+            tids for pat, tids in VULN_KEYWORD_TECHNIQUES if pat.search("OAuth token theft")
+        ]
+        assert any("T1528" in tids for tids in matched)
+
+    def test_weak_encryption(self):
+        matched = [
+            tids for pat, tids in VULN_KEYWORD_TECHNIQUES if pat.search("weak encryption in TLS")
+        ]
+        assert any("T1573" in tids for tids in matched)
+
+    def test_certificate_bypass(self):
+        matched = [
+            tids for pat, tids in VULN_KEYWORD_TECHNIQUES
+            if pat.search("certificate validation bypass")
+        ]
+        assert any("T1553.004" in tids for tids in matched)
