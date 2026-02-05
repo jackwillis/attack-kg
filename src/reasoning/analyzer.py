@@ -1,5 +1,6 @@
 """Single-stage LLM analysis with hallucination mitigation."""
 
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -7,6 +8,7 @@ from rich.console import Console
 
 from src.reasoning.encoder import encode_context
 from src.reasoning.llm import LLMBackend
+from src import debug
 
 console = Console()
 
@@ -145,6 +147,13 @@ class AttackAnalyzer:
         # Step 1: Hybrid retrieval
         result = self.engine.query(finding, top_k=top_k, enrich=True, use_bm25=self.use_bm25)
 
+        debug.log_retrieval(finding, [
+            {"attack_id": t.attack_id, "name": t.name, "similarity": t.similarity,
+             "tactics": t.tactics, "platforms": t.platforms,
+             "cooccurrence_boost": t.cooccurrence_boost}
+            for t in result.techniques
+        ], result.metadata)
+
         # Step 2: Build context with valid ID constraints
         mitigations, valid_mit_ids = self._collect_mitigations(result.techniques)
         d3fend, valid_d3f_ids = self._collect_d3fend(result.techniques)
@@ -152,9 +161,17 @@ class AttackAnalyzer:
 
         context = encode_context(result.techniques, mitigations, d3fend, self.context_format)
 
+        debug.log_context(self.context_format, context, mitigations, d3fend, {
+            "techniques": sorted(valid_tech_ids),
+            "mitigations": sorted(valid_mit_ids),
+            "d3fend": sorted(valid_d3f_ids),
+        })
+
         # Step 3: LLM call
         prompt = f"Security Finding:\n{finding}\n\n{context}\n\nAnalyze this finding."
+        t0 = debug.log_llm_request(prompt, SYSTEM_PROMPT, self.llm.model, type(self.llm).__name__)
         raw = self.llm.generate_json(prompt, system=SYSTEM_PROMPT)
+        debug.log_llm_response(raw, time.monotonic() - t0 if debug.enabled() else 0)
 
         if "error" in raw:
             console.print(f"[red bold]LLM response parse failure[/red bold]")
@@ -228,7 +245,7 @@ class AttackAnalyzer:
                 if fid:
                     console.print(f"[yellow]Filtered hallucinated {cat}: {fid}[/yellow]")
 
-        return AnalysisResult(
+        analysis = AnalysisResult(
             finding=finding,
             finding_type=raw.get("finding_type", "attack_narrative"),
             techniques=techniques, remediations=remediations,
@@ -236,6 +253,8 @@ class AttackAnalyzer:
             kill_chain=raw.get("kill_chain_analysis", ""),
             filtered_ids=filtered,
         )
+        debug.log_validation(filtered, analysis.to_dict())
+        return analysis
 
     def _collect_mitigations(self, techniques) -> tuple[list[dict], set[str]]:
         by_id: dict[str, dict] = {}

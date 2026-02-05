@@ -1,5 +1,6 @@
 """CLI application for attack-kg v2."""
 
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -107,6 +108,17 @@ def build(
     console.print("[bold green]Build complete.[/bold green]")
 
 
+LOG_DIR = Path("log")
+
+
+def _init_debug(debug: bool) -> None:
+    """Initialize debug logging if enabled."""
+    if debug or os.environ.get("ATTACK_KG_DEBUG") == "1":
+        from src import debug as dbg
+        dbg.init(LOG_DIR)
+        console.print(f"[dim]Debug logging to {LOG_DIR}/[/dim]")
+
+
 def _build_analyzer(
     data_dir: Path, model: str, backend: str,
     context_format: str, no_hybrid: bool,
@@ -134,11 +146,13 @@ def analyze(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     context_format: str = typer.Option("xml", "--context-format", "-c", help="Context format (xml|toon|json)"),
     no_hybrid: bool = typer.Option(False, "--no-hybrid", help="Semantic-only retrieval"),
+    debug: bool = typer.Option(False, "--debug", help="Write debug JSONL to log/"),
     data_dir: Path = typer.Option(DEFAULT_DIR, "--data-dir", "-d"),
 ):
     """Analyze a security finding for techniques and remediation."""
     import json
 
+    _init_debug(debug)
     if file:
         text = file.read_text().strip()
     elif finding:
@@ -163,6 +177,7 @@ def repl(
     backend: str = typer.Option("ollama", "--backend", "-b", help="LLM backend"),
     context_format: str = typer.Option("xml", "--context-format", "-c"),
     no_hybrid: bool = typer.Option(False, "--no-hybrid"),
+    debug: bool = typer.Option(False, "--debug", help="Write debug JSONL to log/"),
     data_dir: Path = typer.Option(DEFAULT_DIR, "--data-dir", "-d"),
 ):
     """Interactive analysis REPL."""
@@ -170,6 +185,7 @@ def repl(
     import readline
     from src.cli.output import render_analysis
 
+    _init_debug(debug)
     history_file = data_dir / ".repl_history"
     try:
         readline.read_history_file(str(history_file))
