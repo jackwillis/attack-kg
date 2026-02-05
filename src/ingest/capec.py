@@ -168,7 +168,7 @@ def parse_capec_for_embedding(mappings: dict[str, Any]) -> list[dict[str, Any]]:
                     "type": "capec",
                     "capec_id": capec_id,
                     "attack_id": attack_id,
-                    "name": name,
+                    "name": attack_id,  # Use technique ID; real name filled by enrichment
                 },
             })
     console.print(f"[green]CAPEC embedding: {len(docs)} documents[/green]")

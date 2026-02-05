@@ -25,7 +25,8 @@ def _mock_engine(techniques=None):
                 data_sources=["Logon Session"], campaigns=[],
                 d3fend=[
                     {"d3fend_id": "D3-MFA", "name": "Multi-factor Authentication",
-                     "definition": "Require multiple factors."},
+                     "definition": "Require multiple factors.",
+                     "via_mitigation": "M1032"},
                 ],
             ),
         ]

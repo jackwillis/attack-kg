@@ -222,11 +222,10 @@ class HybridQueryEngine:
                         item["cwe_boost"] = True
                         break
             else:
-                # Inject new technique
+                # Inject new technique (name/tactics/platforms filled by enrichment)
                 combined.append({
-                    "attack_id": aid, "name": t.get("name", ""),
-                    "tactics": [], "platforms": [],
-                    "rrf_score": 0.01 * boost,  # Low base, but boosted
+                    "attack_id": aid, "name": t.get("name", aid),
+                    "rrf_score": 0.01 * boost,
                     "cwe_boost": True,
                 })
         combined.sort(key=lambda x: x.get("rrf_score", 0), reverse=True)
@@ -237,11 +236,11 @@ class HybridQueryEngine:
         tech = self.graph.get_technique(aid) or {}
         return EnrichedTechnique(
             attack_id=aid,
-            name=item.get("name", tech.get("name", "")),
+            name=tech.get("name") or item.get("name", ""),
             description=tech.get("description", ""),
             similarity=item.get("similarity", item.get("rrf_score", 0)),
-            tactics=item.get("tactics", tech.get("tactics", [])),
-            platforms=item.get("platforms", tech.get("platforms", [])),
+            tactics=tech.get("tactics") or item.get("tactics", []),
+            platforms=tech.get("platforms") or item.get("platforms", []),
             mitigations=self.graph.get_mitigations_with_inheritance(aid),
             software=self.graph.get_software_for_technique(aid),
             groups=self.graph.get_groups_for_technique(aid),

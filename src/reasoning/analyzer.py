@@ -159,6 +159,12 @@ class AttackAnalyzer:
         d3fend, valid_d3f_ids = self._collect_d3fend(result.techniques)
         valid_tech_ids = {t.attack_id for t in result.techniques}
 
+        # Prune context to reduce noise for LLM
+        mitigations, d3fend = self._prune_context(result.techniques, mitigations, d3fend)
+        # Update valid ID sets after pruning
+        valid_mit_ids = {m["attack_id"] for m in mitigations}
+        valid_d3f_ids = {d["d3fend_id"] for d in d3fend}
+
         context = encode_context(result.techniques, mitigations, d3fend, self.context_format)
 
         debug.log_context(self.context_format, context, mitigations, d3fend, {
@@ -268,3 +274,41 @@ class AttackAnalyzer:
                 elif tech.attack_id not in by_id[did]["addresses"]:
                     by_id[did]["addresses"].append(tech.attack_id)
         return list(by_id.values()), set(by_id.keys())
+
+    @staticmethod
+    def _prune_context(
+        techniques: list, mitigations: list[dict], d3fend: list[dict],
+        max_mitigations: int = 8, max_d3fend: int = 10,
+    ) -> tuple[list[dict], list[dict]]:
+        """Prune context to reduce noise for LLM.
+
+        Strategy:
+        - Focus mitigations on top 3 techniques (highest similarity)
+        - Rank mitigations by how many top techniques they address
+        - Scope D3FEND to surviving mitigations
+        - Cap totals to prevent context bloat
+        """
+        if not techniques:
+            return mitigations, d3fend
+
+        # Top 3 techniques by similarity are the "focus set"
+        focus_ids = {t.attack_id for t in sorted(
+            techniques, key=lambda t: t.similarity, reverse=True,
+        )[:3]}
+
+        # Score mitigations: +2 for each focus technique addressed, +1 for others
+        def mit_score(m: dict) -> int:
+            addrs = set(m.get("addresses", []))
+            return 2 * len(addrs & focus_ids) + len(addrs - focus_ids)
+
+        scored = sorted(mitigations, key=mit_score, reverse=True)
+        # Keep mitigations that address at least one focus technique, up to cap
+        pruned_mits = [m for m in scored if set(m.get("addresses", [])) & focus_ids]
+        pruned_mits = pruned_mits[:max_mitigations]
+        surviving_mit_ids = {m["attack_id"] for m in pruned_mits}
+
+        # Scope D3FEND to surviving mitigations
+        pruned_d3f = [d for d in d3fend if d.get("via_mitigation") in surviving_mit_ids]
+        pruned_d3f = pruned_d3f[:max_d3fend]
+
+        return pruned_mits, pruned_d3f

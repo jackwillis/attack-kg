@@ -155,7 +155,7 @@ class TestParseCapecForEmbedding:
         assert doc["metadata"]["type"] == "capec"
         assert doc["metadata"]["capec_id"] == "CAPEC-86"
         assert doc["metadata"]["attack_id"] == "T1059.007"
-        assert doc["metadata"]["name"] == "XSS via HTTP Headers"
+        assert doc["metadata"]["name"] == "T1059.007"  # Technique ID, not CAPEC name
 
     def test_multiple_techniques_per_pattern(self, tmp_path):
         xml = _write_capec_xml(tmp_path, [
