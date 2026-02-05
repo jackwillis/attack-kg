@@ -154,39 +154,6 @@ class AttackGraph:
             for r in rows
         ]
 
-    def get_all_software_names(self) -> list[dict[str, str]]:
-        """Return all software names and aliases for building a match index."""
-        rows = self.query("""
-        SELECT ?attackId ?name WHERE {
-            ?s a ?type ; attack:attackId ?attackId ; rdfs:label ?name .
-            FILTER(?type IN (attack:Malware, attack:Tool))
-        }
-        """)
-        results = [{"attack_id": r["attackId"], "name": r["name"]} for r in rows]
-        # Also include aliases
-        alias_rows = self.query("""
-        SELECT ?attackId ?alias WHERE {
-            ?s a ?type ; attack:attackId ?attackId ; attack:alias ?alias .
-            FILTER(?type IN (attack:Malware, attack:Tool))
-        }
-        """)
-        for r in alias_rows:
-            results.append({"attack_id": r["attackId"], "name": r["alias"]})
-        return results
-
-    def get_techniques_for_software(self, software_id: str) -> list[dict[str, str]]:
-        """Map software → techniques it uses."""
-        return [
-            {"attack_id": r["tid"], "name": r.get("tname", "")}
-            for r in self.query(f"""
-            SELECT ?tid ?tname WHERE {{
-                <{A}software/{software_id}> attack:uses ?tech .
-                ?tech attack:attackId ?tid .
-                OPTIONAL {{ ?tech rdfs:label ?tname }}
-            }}
-            """)
-        ]
-
     def get_groups_for_technique(self, attack_id: str) -> list[dict[str, str]]:
         uri = self._tech_uri(attack_id)
         return [
