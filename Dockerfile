@@ -53,7 +53,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # Copy the built venv, data, and HuggingFace model cache from builder
 COPY --from=builder /app/.venv /app/.venv
-COPY --from=builder /root/.attack_kg /root/.attack_kg
+COPY --from=builder /app/data /app/data
 COPY --from=builder /root/.cache/huggingface /root/.cache/huggingface
 COPY --from=builder /app/pyproject.toml /app/uv.lock ./
 COPY --from=builder /app/src /app/src
