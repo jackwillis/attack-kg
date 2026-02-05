@@ -178,7 +178,7 @@ def repl(
 
     analyzer = _build_analyzer(data_dir, model, backend, context_format, no_hybrid)
     console.print(f"[bold]attack-kg v2 REPL[/bold] (model={model}, backend={backend})")
-    console.print("Type a finding to analyze. @path to load from file. Ctrl-D to exit.\n")
+    console.print("Type a finding to analyze, or @/path/to/file to load from file. Ctrl-D to exit.\n")
 
     while True:
         try:
@@ -194,7 +194,7 @@ def repl(
             continue
         if line.startswith("@"):
             try:
-                text = Path(line[1:]).read_text().strip()
+                text = Path(line[1:]).expanduser().read_text().strip()
             except Exception as e:
                 from rich.markup import escape as _esc
                 console.print(f"[red]Error reading file: {_esc(str(e))}[/red]")
