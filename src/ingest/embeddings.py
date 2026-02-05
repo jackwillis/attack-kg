@@ -18,6 +18,21 @@ _MODEL_REVISIONS = {
 }
 
 
+def _suppress_stderr():
+    """Redirect fd 2 to devnull, return restore function."""
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    saved = os.dup(2)
+    os.dup2(devnull, 2)
+    os.close(devnull)
+    return saved
+
+
+def _restore_stderr(saved_fd: int):
+    """Restore fd 2 from saved descriptor."""
+    os.dup2(saved_fd, 2)
+    os.close(saved_fd)
+
+
 class EmbeddingGenerator:
     """Sentence-transformers embedding model with offline support."""
 
@@ -34,10 +49,16 @@ class EmbeddingGenerator:
         if self._model is None:
             from sentence_transformers import SentenceTransformer
             console.print(f"[blue]Loading embedding model: {self.model_name}[/blue]")
-            self._model = SentenceTransformer(
-                self.model_name, trust_remote_code=True,
-                revision=self._revision, local_files_only=self._offline,
-            )
+            # Suppress safetensors "UNEXPECTED position_ids" load report
+            # (expected when loading BERT for a different task architecture)
+            _saved = _suppress_stderr()
+            try:
+                self._model = SentenceTransformer(
+                    self.model_name, trust_remote_code=True,
+                    revision=self._revision, local_files_only=self._offline,
+                )
+            finally:
+                _restore_stderr(_saved)
         return self._model
 
     def embed(self, texts: list[str]) -> list[list[float]]:

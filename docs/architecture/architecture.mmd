@@ -29,7 +29,7 @@ flowchart TB
         end
 
         RDF["attack.nt + capec.nt<br/><i>RDF N-Triples<br/>(74K+ triples)</i>"]
-        EMB["embeddings.py<br/><i>sentence-transformers<br/>nomic-embed-text-v1.5<br/>+LOLBAS/GTFOBins/CAPEC</i>"]
+        EMB["embeddings.py<br/><i>ATT&CK BERT (768-dim)<br/>+LOLBAS/GTFOBins/CAPEC</i>"]
     end
 
     subgraph Storage["Persistent Storage Layer"]
@@ -42,12 +42,14 @@ flowchart TB
         direction LR
         AG["AttackGraph<br/><i>graph.py</i><br/>SPARQL queries,<br/>Mitigation inheritance,<br/>CWE/CAPEC mapping"]
         SS["SemanticSearch<br/><i>semantic.py</i>"]
-        KW["KeywordSearch<br/><i>keyword.py</i><br/>BM25"]
+        KW["KeywordSearch<br/><i>keyword.py</i><br/>BM25 (CVE/CWE-aware)"]
     end
 
     subgraph Query["HybridQueryEngine (engine.py)"]
         direction TB
-        HYB["<b>Neuro-Symbolic Core</b><br/>RRF Fusion + Co-occurrence<br/>+ CWE/CAPEC Injection<br/>+ CAPEC Semantic Matching"]
+        ROUTER["FindingRouter<br/><i>router.py</i><br/>Vulnerability vs Attack Narrative<br/>+ Platform Detection"]
+        HYB["<b>Neuro-Symbolic Core</b><br/>RRF Fusion<br/>+ Co-occurrence (narratives only)<br/>+ CWE/CAPEC Injection<br/>+ Vuln Keyword Table (39 patterns)<br/>+ Platform Boosting"]
+        ROUTER --> HYB
     end
 
     subgraph Reasoning["Reasoning Module"]
@@ -112,9 +114,11 @@ flowchart TB
     classDef core fill:#D4EDDA,stroke:#28A745,stroke-width:2px
     classDef llm fill:#F8D7DA,stroke:#DC3545,stroke-width:2px
     classDef interface fill:#E2E3E5,stroke:#6C757D,stroke-width:2px
+    classDef router fill:#F0E6FF,stroke:#7B2D8E,stroke-width:2px
 
     class MITRE,D3FEND,CAPEC,LOLBAS,GTFO external
     class OXI,CHROMA storage
     class HYB,ENC core
+    class ROUTER router
     class OLLAMA,OPENAI,ANALYZER llm
     class CLI,REPL interface

@@ -42,11 +42,14 @@ For "attack_narrative" findings:
 - Quote evidence verbatim
 
 For "vulnerability" findings:
-- If the vulnerability describes a SPECIFIC ATTACK MECHANISM that maps to a technique, select it
-- If the finding is just an exposure with NO specific mechanism, return empty techniques
+- If the vulnerability describes a specific attack mechanism, select matching techniques
+- Exposed authentication surfaces (login pages, admin panels, SSO endpoints, APIs) are preconditions for credential attacks — map to relevant techniques (T1110 Brute Force, T1078 Valid Accounts, T1190 Exploit Public-Facing Application) at medium confidence
+- Misconfigurations that create a clear attack path (e.g., exposed storage → data theft, default credentials → initial access) also map to techniques
+- Only return empty techniques if no candidate describes a plausible attack enabled by this vulnerability
 
-Confidence: high (explicit match), medium (strong inference), low (circumstantial)
+Confidence: high (explicit match), medium (strong inference from exposure/misconfiguration), low (circumstantial)
 If no candidates match with at least medium confidence, return empty techniques array.
+For vulnerability findings, the "evidence" field should quote the relevant exposure description rather than attacker actions.
 
 ### STEP 4: KILL CHAIN ANALYSIS ###
 Connect identified techniques chronologically in one sentence.

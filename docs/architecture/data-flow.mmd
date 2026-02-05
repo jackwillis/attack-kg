@@ -4,22 +4,30 @@ sequenceDiagram
     autonumber
     participant User
     participant CLI as CLI (main.py)
+    participant Router as FindingRouter
     participant Hybrid as HybridQueryEngine
     participant Vectors as ChromaDB
     participant BM25 as KeywordSearch
     participant Graph as Oxigraph
     participant LLM as LLM Backend
 
-    Note over User,LLM: Query Flow: "Found password spraying attack"
+    Note over User,LLM: Query Flow: "Found password spraying attack on Windows domain"
 
-    User->>CLI: analyze "Found password spraying attack"
-    CLI->>Hybrid: query(narrative, top_k=5)
+    User->>CLI: analyze "Found password spraying attack on Windows domain"
+    CLI->>Hybrid: query(finding, top_k=5)
+
+    rect rgb(240, 230, 255)
+        Note over Hybrid,Router: Step 1: Finding-Type Router (Deterministic)
+        Hybrid->>Router: route_finding(text)
+        Router-->>Hybrid: RoutingDecision<br/>type=attack_narrative, confidence=0.85<br/>platforms=[Windows], signals=[password, domain]
+        Note over Hybrid: Router adjusts retrieval weights:<br/>attack_narrative → co-occurrence ON, CWE boost 1.4x<br/>vulnerability → co-occurrence OFF, CWE boost 2.0x
+    end
 
     rect rgb(230, 245, 255)
-        Note over Hybrid,BM25: Step 1: Hybrid Retrieval (RRF + Co-occurrence)<br/>Includes ATT&CK + LOLBAS + GTFOBins + CAPEC
-        Hybrid->>Vectors: embed(narrative)
+        Note over Hybrid,BM25: Step 2: Hybrid Retrieval (RRF Fusion)<br/>Includes ATT&CK + LOLBAS + GTFOBins + CAPEC
+        Hybrid->>Vectors: embed(finding) via ATT&CK BERT
         Vectors-->>Hybrid: semantic candidates + similarity scores
-        Hybrid->>BM25: tokenize + search(narrative)
+        Hybrid->>BM25: tokenize + search(finding)
         BM25-->>Hybrid: keyword candidates + BM25 scores
         Note over Hybrid: Reciprocal Rank Fusion<br/>score = Σ 1/(k + rank)
         Hybrid->>Graph: get_cooccurring_techniques(top_3)
@@ -29,15 +37,21 @@ sequenceDiagram
     end
 
     rect rgb(255, 245, 230)
-        Note over Hybrid,Graph: Step 2: CWE/CAPEC Injection
+        Note over Hybrid,Graph: Step 3: CWE/CAPEC + Vuln Keyword Injection
         Hybrid->>Hybrid: Detect CWE-nnn patterns in finding text
         Hybrid->>Graph: get_techniques_for_cwe(CWE-nnn)
         Graph-->>Hybrid: CWE → CAPEC → ATT&CK techniques
+        Hybrid->>Hybrid: Match vuln keywords (39 patterns)<br/>e.g. "authentication bypass" → T1190, T1556
         Note over Hybrid: CAPEC patterns also matched<br/>semantically via ChromaDB embeddings
     end
 
+    rect rgb(244, 248, 255)
+        Note over Hybrid: Step 4: Platform Boosting
+        Note over Hybrid: Detected platforms: [Windows]<br/>Boost matching techniques by 1.2x
+    end
+
     rect rgb(230, 255, 230)
-        Note over Hybrid,Graph: Step 3: Symbolic Enrichment (SPARQL)
+        Note over Hybrid,Graph: Step 5: Symbolic Enrichment (SPARQL)
         loop For each candidate technique
             Hybrid->>Graph: get_technique(id)
             Graph-->>Hybrid: technique details + tactics
@@ -55,12 +69,12 @@ sequenceDiagram
     Hybrid-->>CLI: EnrichedTechnique[]
 
     rect rgb(255, 230, 230)
-        Note over CLI,LLM: Step 4: Single-Stage LLM Analysis
+        Note over CLI,LLM: Step 6: Single-Stage LLM Analysis
         CLI->>CLI: Build context (XML default, or TOON/JSON)
-        CLI->>LLM: analyze(narrative, encoded_context)
+        CLI->>LLM: analyze(finding, encoded_context)
         Note right of LLM: Classify techniques + write remediation<br/>Constrained to provided candidates<br/>Output: techniques, mitigations, D3FEND
         LLM-->>CLI: AnalysisResult JSON
-        CLI->>CLI: Validate IDs against retrieval set
+        CLI->>CLI: Validate IDs against retrieval set<br/>Check router/LLM type agreement
     end
 
     CLI-->>User: AnalysisResult<br/>{techniques, remediations, detections, d3fend}

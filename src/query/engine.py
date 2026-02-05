@@ -56,6 +56,9 @@ VULN_KEYWORD_TECHNIQUES: list[tuple[re.Pattern, list[str]]] = [
     (re.compile(r"\bopen.?redirect\b", re.I), ["T1189"]),
     (re.compile(r"\binsecure.?(?:default|permission|config)\b", re.I), ["T1574"]),
     (re.compile(r"\bexposed.?(?:service|port|endpoint|interface|api)\b", re.I), ["T1190"]),
+    (re.compile(r"\b(?:login|admin|management).?(?:page|panel|portal|console|interface).?(?:exposed|accessible|public|internet)\b", re.I), ["T1190", "T1078"]),
+    (re.compile(r"\b(?:exposed|accessible|public).{0,20}(?:login|admin|management|authentication)\b", re.I), ["T1190", "T1078"]),
+    (re.compile(r"\bimproper.?access.?control\b", re.I), ["T1078"]),
     # Cloud-specific
     (re.compile(r"\bIAM.?misconfigur\b", re.I), ["T1078", "T1098"]),
     (re.compile(r"\bS3.?bucket.?(?:exposed|public|open)\b", re.I), ["T1530"]),

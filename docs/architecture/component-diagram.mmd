@@ -31,6 +31,16 @@ graph LR
         GT["GTFOBins<br/><i>Linux Binaries</i><br/>curl, wget, etc."]
     end
 
+    subgraph Routing["Finding-Type Router (router.py)"]
+        direction TB
+        RT["FindingRouter<br/><i>Deterministic classification</i><br/>vulnerability vs attack_narrative"]
+        PD["Platform Detection<br/><i>Windows, Linux, macOS,<br/>Cloud, Azure AD, Network</i>"]
+    end
+
+    subgraph VulnKW["Vuln Keyword Table (engine.py)"]
+        VK["39 Regex Patterns<br/><i>auth bypass → T1190, T1556<br/>SQL injection → T1190<br/>container escape → T1611</i>"]
+    end
+
     subgraph Relations["RDF Relationships"]
         direction TB
         R1["attack:uses"]
@@ -47,7 +57,7 @@ graph LR
         Q1["Technique Lookup<br/><i>get_technique(T1110.003)</i>"]
         Q2["Group Analysis<br/><i>get_groups_for_technique()</i>"]
         Q3["Mitigation Mapping<br/><i>get_mitigations_with_inheritance()</i>"]
-        Q4["Hybrid Search<br/><i>BM25 + Semantic + RRF</i>"]
+        Q4["Hybrid Search<br/><i>BM25 + ATT&CK BERT + RRF</i>"]
         Q5["Single-Stage Analysis<br/><i>AttackAnalyzer</i>"]
         Q6["D3FEND Countermeasures<br/><i>get_d3fend_for_technique()</i>"]
         Q7["CWE/CAPEC Mapping<br/><i>CWE → CAPEC → Technique</i>"]
@@ -81,6 +91,9 @@ graph LR
     R7 --> Q7
     Q7 --> Q5
 
+    RT --> Q4
+    PD --> Q4
+    VK --> Q4
     LB --> Q4
     GT --> Q4
     DS --> Q5
@@ -92,6 +105,7 @@ graph LR
     classDef relation fill:#FFF3CD,stroke:#FFC107
     classDef query fill:#E2E3E5,stroke:#6C757D
     classDef capec fill:#F0E6FF,stroke:#7B2D8E
+    classDef router fill:#FCE4EC,stroke:#E91E63
 
     class T1,G1,S1,M1,TC,DS,DET,CAM entity
     class D1,D2 defense
@@ -99,3 +113,5 @@ graph LR
     class R1,R2,R3,R4,R5,R6,R7 relation
     class Q1,Q2,Q3,Q4,Q5,Q6,Q7 query
     class CWE,CAP capec
+    class RT,PD router
+    class VK router
