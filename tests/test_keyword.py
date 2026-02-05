@@ -30,3 +30,25 @@ class TestTokenize:
         assert "hello" in tokens
         assert "world" in tokens
         assert "test" in tokens
+
+    def test_tokenize_preserves_cve_ids(self):
+        tokens = _tokenize("CVE-2024-1234 exploit found")
+        assert "CVE-2024-1234" in tokens
+        assert "exploit" in tokens
+        assert "found" in tokens
+
+    def test_tokenize_preserves_cwe_ids(self):
+        tokens = _tokenize("CWE-79 cross-site scripting")
+        assert "CWE-79" in tokens
+        assert "cross-site" in tokens
+        assert "scripting" in tokens
+
+    def test_tokenize_cve_cwe_uppercased(self):
+        tokens = _tokenize("cve-2024-5678 and cwe-89")
+        assert "CVE-2024-5678" in tokens
+        assert "CWE-89" in tokens
+
+    def test_tokenize_multiple_cve(self):
+        tokens = _tokenize("CVE-2024-1234 and CVE-2023-99999")
+        assert "CVE-2024-1234" in tokens
+        assert "CVE-2023-99999" in tokens

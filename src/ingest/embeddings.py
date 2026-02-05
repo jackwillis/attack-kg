@@ -8,15 +8,39 @@ from rich.console import Console
 
 console = Console()
 
+DEFAULT_MODEL = "basel/ATTACK-BERT"
+ATTACK_BERT_REVISION = "81e30f983a822c606825507b63ae318a6830a8a2"
 NOMIC_REVISION = "e5cf08aadaa33385f5990def41f7a23405aec398"
+
+_MODEL_REVISIONS = {
+    "ATTACK-BERT": ATTACK_BERT_REVISION,
+    "nomic": NOMIC_REVISION,
+}
+
+
+def _suppress_stderr():
+    """Redirect fd 2 to devnull, return restore function."""
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    saved = os.dup(2)
+    os.dup2(devnull, 2)
+    os.close(devnull)
+    return saved
+
+
+def _restore_stderr(saved_fd: int):
+    """Restore fd 2 from saved descriptor."""
+    os.dup2(saved_fd, 2)
+    os.close(saved_fd)
 
 
 class EmbeddingGenerator:
     """Sentence-transformers embedding model with offline support."""
 
-    def __init__(self, model: str = "nomic-ai/nomic-embed-text-v1.5"):
+    def __init__(self, model: str = DEFAULT_MODEL):
         self.model_name = model
-        self._revision = NOMIC_REVISION if "nomic" in model else None
+        self._revision = next(
+            (rev for key, rev in _MODEL_REVISIONS.items() if key in model), None
+        )
         self._offline = os.environ.get("ATTACK_KG_OFFLINE", "").lower() in ("1", "true")
         self._model = None
 
@@ -25,10 +49,16 @@ class EmbeddingGenerator:
         if self._model is None:
             from sentence_transformers import SentenceTransformer
             console.print(f"[blue]Loading embedding model: {self.model_name}[/blue]")
-            self._model = SentenceTransformer(
-                self.model_name, trust_remote_code=True,
-                revision=self._revision, local_files_only=self._offline,
-            )
+            # Suppress safetensors "UNEXPECTED position_ids" load report
+            # (expected when loading BERT for a different task architecture)
+            _saved = _suppress_stderr()
+            try:
+                self._model = SentenceTransformer(
+                    self.model_name, trust_remote_code=True,
+                    revision=self._revision, local_files_only=self._offline,
+                )
+            finally:
+                _restore_stderr(_saved)
         return self._model
 
     def embed(self, texts: list[str]) -> list[list[float]]:

@@ -19,10 +19,19 @@ class KeywordResult:
     platforms: list[str]
 
 
+_CVE_CWE_RE = re.compile(r"\b(CVE-\d{4}-\d{4,7}|CWE-\d{1,4})\b", re.IGNORECASE)
+
+
 def _tokenize(text: str) -> list[str]:
     if not text:
         return []
-    return re.findall(r"[a-z0-9]+(?:[.\-][a-z0-9]+)*", text.lower())
+    # Extract CVE/CWE IDs as atomic uppercase tokens first
+    ids = _CVE_CWE_RE.findall(text)
+    normalized_ids = [i.upper() for i in ids]
+    # Remove CVE/CWE IDs from text before general tokenization
+    remainder = _CVE_CWE_RE.sub("", text)
+    general = re.findall(r"[a-z0-9]+(?:[.\-][a-z0-9]+)*", remainder.lower())
+    return normalized_ids + general
 
 
 class KeywordSearch:

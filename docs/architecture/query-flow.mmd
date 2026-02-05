@@ -5,6 +5,7 @@ sequenceDiagram
     participant User
     participant CLI
     participant HybridEngine as HybridQueryEngine
+    participant Router as FindingRouter
     participant Semantic as SemanticSearch
     participant ChromaDB
     participant Keyword as KeywordSearch
@@ -12,23 +13,34 @@ sequenceDiagram
     participant Oxigraph
     participant LLM as AttackAnalyzer + LLM
 
-    User->>CLI: analyze "password spraying attack"
+    User->>CLI: analyze "password spraying attack on Windows domain"
     CLI->>HybridEngine: query(finding_text, top_k=5)
+
+    rect rgb(240, 230, 255)
+        Note over HybridEngine,Router: Finding-Type Router (Zero LLM Cost)
+        HybridEngine->>Router: route_finding(text)
+        Router->>Router: Score vulnerability signals (CVE, CWE, CVSS, ...)
+        Router->>Router: Score attack signals (APT, IOCs, past-tense, ...)
+        Router->>Router: detect_platforms(text) → [Windows]
+        Router-->>HybridEngine: RoutingDecision(type=attack_narrative,<br/>confidence=0.85, platforms=[Windows])
+        Note over HybridEngine: Adjust parameters per finding type:<br/>attack_narrative: co-occurrence=ON, cwe_boost=1.4x, vuln_kw_boost=1.3x<br/>vulnerability: co-occurrence=OFF, cwe_boost=2.0x, vuln_kw_boost=1.8x
+    end
 
     rect rgb(232, 244, 248)
         Note over HybridEngine,Keyword: Hybrid Retrieval - RRF Fusion<br/>(ATT&CK + LOLBAS + GTFOBins + CAPEC)
         HybridEngine->>Semantic: search(finding_text)
-        Semantic->>ChromaDB: query(embedding, n_results=10)
+        Semantic->>ChromaDB: query(ATT&CK BERT embedding, n_results=10)
         ChromaDB-->>Semantic: semantic candidates + similarity scores<br/>+ tool→technique mappings (certutil→T1105)
         Semantic-->>HybridEngine: SemanticResult[]
         HybridEngine->>Keyword: search(finding_text)
+        Note over Keyword: CVE/CWE IDs tokenized as atomic<br/>uppercase tokens (CVE-2024-1234)
         Keyword-->>HybridEngine: KeywordResult[] (BM25 scores)
         Note over HybridEngine: Reciprocal Rank Fusion<br/>score(d) = Σ 1/(60 + rank)
         HybridEngine->>HybridEngine: Fuse results
     end
 
     rect rgb(255, 248, 220)
-        Note over HybridEngine,Oxigraph: Co-occurrence Inductive Bias
+        Note over HybridEngine,Oxigraph: Co-occurrence Inductive Bias<br/>(attack_narrative only)
         HybridEngine->>Graph: get_cooccurring_techniques(top_3_seeds)
         Graph->>Oxigraph: SPARQL: techniques in same campaigns/groups
         Oxigraph-->>Graph: co-occurring techniques + counts
@@ -37,13 +49,20 @@ sequenceDiagram
     end
 
     rect rgb(240, 230, 255)
-        Note over HybridEngine,Oxigraph: CWE/CAPEC Injection + CAPEC Semantic Matching
+        Note over HybridEngine,Oxigraph: CWE/CAPEC Injection + Vuln Keyword Matching
         HybridEngine->>HybridEngine: Extract CWE-nnn from finding text
         HybridEngine->>Graph: get_techniques_for_cwe(CWE-nnn)
         Graph->>Oxigraph: SPARQL: CWE → CAPEC → Technique
         Oxigraph-->>Graph: mapped techniques
-        HybridEngine->>HybridEngine: Inject + boost CWE techniques (1.4x)
+        HybridEngine->>HybridEngine: Inject + boost CWE techniques
+        HybridEngine->>HybridEngine: Match vuln keyword patterns (39 regexes)<br/>e.g. "auth bypass" → T1190, T1556
         Note over HybridEngine: CAPEC patterns also matched<br/>semantically via ChromaDB embeddings
+    end
+
+    rect rgb(244, 248, 255)
+        Note over HybridEngine: Platform Boosting
+        HybridEngine->>HybridEngine: Compare detected platforms [Windows]<br/>against candidate technique platforms
+        Note over HybridEngine: Matching platforms → 1.2x score boost<br/>Does not eliminate non-matching techniques
     end
 
     rect rgb(212, 237, 218)
@@ -71,6 +90,7 @@ sequenceDiagram
         Note right of LLM: Task: Classify + write remediation<br/>Constrained to provided candidates<br/>Output: techniques, mitigations, D3FEND
         LLM-->>CLI: AnalysisResult JSON
         CLI->>CLI: Validate all IDs against retrieval set
+        CLI->>CLI: Check router/LLM finding type agreement
     end
 
     CLI-->>User: Techniques (validated),<br/>Mitigations (prioritized),<br/>D3FEND Countermeasures,<br/>Detections
