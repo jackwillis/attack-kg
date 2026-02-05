@@ -1,3 +1,38 @@
+# attack-kg
+
+**attack-kg** is a security remediation engine that maps security findings to MITRE ATT&CK techniques and generates prioritized remediation plans. Given a raw finding — a vulnerability report, an incident narrative, a penetration test observation — it identifies the relevant ATT&CK techniques, recommends mitigations, suggests D3FEND defensive countermeasures, and produces detection recommendations anchored to specific ATT&CK data sources.
+
+The system is built as a graph-grounded RAG (retrieval-augmented generation) pipeline. A knowledge graph containing the full ATT&CK, D3FEND, and CAPEC frameworks — along with LOLBAS and GTFOBins tool mappings — is stored as RDF and queried via SPARQL. Retrieval uses a hybrid approach: domain-specific embeddings (ATT&CK BERT) fused with BM25 keyword search through reciprocal rank fusion. A deterministic finding-type router classifies inputs as vulnerability reports or attack narratives before retrieval, adjusting the pipeline's behavior — vulnerability findings get stronger CWE-to-CAPEC-to-technique graph injection, while attack narratives get co-occurrence boosting from campaign and threat group data.
+
+After retrieval, the top candidate techniques are enriched from the graph: mitigations (with subtechnique inheritance from parent techniques), D3FEND countermeasures, software associations, threat group usage, campaign co-occurrence, and detection data sources propagated from ATT&CK's detection strategy chains. This enriched context is encoded in a compact XML format and passed to an LLM for single-stage analysis.
+
+The LLM's role is deliberately constrained. It selects from provided candidates, not from its parametric memory. Every technique ID, mitigation ID, D3FEND ID, and data source name in the output is validated against the retrieval set — anything the LLM hallucinates gets filtered before it reaches the user. The graph provides structure and guarantees; the LLM provides natural language understanding and prioritization.
+
+The system runs entirely local. The knowledge graph is backed by pyoxigraph, vector search by ChromaDB, and LLM inference by Ollama (with an OpenAI-compatible backend option). All data sources are downloaded, converted to RDF, and indexed at build time. No finding data leaves the network.
+
+## Usage
+
+```bash
+# Download, ingest, and build the knowledge graph
+attack-kg download
+attack-kg ingest
+attack-kg build
+
+# Analyze a finding
+attack-kg analyze "password spraying against Azure AD"
+attack-kg analyze --file finding.txt
+attack-kg analyze --json "lateral movement via RDP"
+
+# Interactive mode
+attack-kg repl
+```
+
+## Architecture
+
+![Architecture](docs/architecture/architecture.png)
+
+---
+
 # Cloud Migration
 
 How to evolve attack-kg from a local CLI tool to a cloud-native service, in four progressive levels.
