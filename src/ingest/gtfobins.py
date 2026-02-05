@@ -34,7 +34,7 @@ def parse_gtfobins(gtfo_dir: Path) -> list[dict[str, Any]]:
             data = yaml.safe_load(fp.read_text())
             if not data or not isinstance(data, dict):
                 continue
-            name = fp.name
+            name = fp.stem  # strip .md extension
             funcs = data.get("functions", {})
             if not isinstance(funcs, dict):
                 continue

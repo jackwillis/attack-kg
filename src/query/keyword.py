@@ -43,8 +43,7 @@ class KeywordSearch:
             ?t a attack:Technique ; attack:attackId ?attackId ; rdfs:label ?name .
             OPTIONAL { ?t attack:description ?description }
             OPTIONAL { ?t attack:detection ?detection }
-            OPTIONAL { ?t attack:tactic ?tu .
-                       BIND(REPLACE(STR(?tu), "https://attack.mitre.org/tactic/", "") AS ?tactic) }
+            OPTIONAL { ?t attack:tactic ?tu . ?tu rdfs:label ?tactic }
             OPTIONAL { ?t attack:platform ?platform }
         }
         GROUP BY ?attackId ?name ?description ?detection

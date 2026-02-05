@@ -1,0 +1,32 @@
+"""Tests for BM25 keyword search."""
+
+from src.query.keyword import _tokenize, KeywordResult
+
+
+class TestTokenize:
+    def test_basic(self):
+        assert _tokenize("hello world") == ["hello", "world"]
+
+    def test_preserves_technique_ids(self):
+        tokens = _tokenize("T1110.003 Password Spraying")
+        assert "t1110.003" in tokens
+        assert "password" in tokens
+        assert "spraying" in tokens
+
+    def test_preserves_hyphenated(self):
+        tokens = _tokenize("credential-access defense-evasion")
+        assert "credential-access" in tokens
+        assert "defense-evasion" in tokens
+
+    def test_case_insensitive(self):
+        assert _tokenize("PowerShell") == ["powershell"]
+
+    def test_empty(self):
+        assert _tokenize("") == []
+        assert _tokenize(None) == []
+
+    def test_strips_special_chars(self):
+        tokens = _tokenize("hello! @world #test")
+        assert "hello" in tokens
+        assert "world" in tokens
+        assert "test" in tokens

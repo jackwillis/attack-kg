@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from math import exp, sqrt
 from pathlib import Path
 from typing import Any
@@ -183,7 +183,7 @@ class HybridQueryEngine:
         if not combined:
             return combined
         boosts: dict[str, float] = {}
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         for seed in combined[:seeds]:
             cooc = self.graph.get_cooccurring_techniques(seed["attack_id"], min_count=1, limit=15)
             for c in cooc:
@@ -199,12 +199,15 @@ class HybridQueryEngine:
                 if latest and campaign_weight > 0:
                     try:
                         last_date = datetime.fromisoformat(latest.replace("Z", "+00:00"))
-                        age_years = (now - last_date.replace(tzinfo=None)).days / 365.25
+                        if last_date.tzinfo is None:
+                            last_date = last_date.replace(tzinfo=timezone.utc)
+                        age_years = (now - last_date).days / 365.25
                         time_factor = exp(-0.1 * max(0, age_years))
                     except (ValueError, TypeError):
                         pass
                 strength = min(max_boost, 1.0 + sqrt(weighted_count) * 0.1 * (0.5 + 0.5 * time_factor))
-                boosts[c["attack_id"]] = boosts.get(c["attack_id"], 1.0) * strength
+                accumulated = boosts.get(c["attack_id"], 1.0) * strength
+                boosts[c["attack_id"]] = min(accumulated, max_boost)
         for item in combined:
             aid = item["attack_id"]
             if aid in boosts:

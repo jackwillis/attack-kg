@@ -7,6 +7,8 @@ from rich.console import Console
 
 console = Console()
 
+A = "https://attack.mitre.org/"
+
 PREFIXES = """
 PREFIX attack: <https://attack.mitre.org/>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
@@ -27,15 +29,14 @@ class AttackGraph:
         if store_path:
             Path(store_path).mkdir(parents=True, exist_ok=True)
 
-    def load_file(self, path: Path | str, fmt: str = "nt", force: bool = False) -> int:
+    def load_file(self, path: Path | str, fmt: str = "nt", clear: bool = False) -> int:
+        """Load an RDF file into the store. Always additive unless clear=True."""
         import pyoxigraph, time
         path = Path(path)
         before = len(self._store)
-        if before > 0 and not force:
-            console.print(f"[green]Store has {before} triples, skipping load[/green]")
-            return 0
-        if force and before > 0:
+        if clear and before > 0:
             self._store.clear()
+            before = 0
         formats = {
             "nt": pyoxigraph.RdfFormat.N_TRIPLES,
             "ttl": pyoxigraph.RdfFormat.TURTLE,

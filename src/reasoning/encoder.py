@@ -176,6 +176,26 @@ def encode_toon(techniques: list, mitigations: list[dict], d3fend: list[dict]) -
 
 def encode_json(techniques: list, mitigations: list[dict], d3fend: list[dict]) -> str:
     """Encode RAG context as JSON."""
+    # Software (deduplicated)
+    sw_map: dict[str, dict] = {}
+    for t in techniques:
+        for s in t.software:
+            sid = s["attack_id"]
+            if sid not in sw_map:
+                sw_map[sid] = {"id": sid, "name": s["name"], "type": s["type"], "techniques": []}
+            sw_map[sid]["techniques"].append(t.attack_id)
+    # Detections (deduplicated)
+    det_map: dict[str, list[str]] = {}
+    for t in techniques:
+        for d in t.detection_strategies:
+            dn = d.get("name", "")
+            det_map.setdefault(dn, []).append(t.attack_id)
+    # Data sources (deduplicated)
+    ds_map: dict[str, list[str]] = {}
+    for t in techniques:
+        for ds in t.data_sources:
+            ds_map.setdefault(ds, []).append(t.attack_id)
+
     data = {
         "techniques": [
             {"attack_id": t.attack_id, "name": t.name, "tactics": t.tactics,
@@ -183,8 +203,13 @@ def encode_json(techniques: list, mitigations: list[dict], d3fend: list[dict]) -
              "description": t.description[:200] if t.description else ""}
             for t in techniques
         ],
+        "software": list(sw_map.values())[:10],
         "mitigations": mitigations,
         "d3fend": d3fend,
+        "detections": [{"name": n, "techniques": t[:5]} for n, t in
+                       sorted(det_map.items(), key=lambda x: len(x[1]), reverse=True)[:10]],
+        "data_sources": [{"name": n, "techniques": t[:5]} for n, t in
+                         sorted(ds_map.items(), key=lambda x: len(x[1]), reverse=True)[:10]],
     }
     return json.dumps(data, indent=2)
 

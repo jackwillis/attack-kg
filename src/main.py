@@ -83,14 +83,14 @@ def build(
     if not nt.exists():
         console.print("[red]Run 'ingest' first.[/red]")
         raise typer.Exit(1)
-    graph.load_file(nt, fmt="nt", force=True)
+    graph.load_file(nt, fmt="nt", clear=True)
 
-    # Load D3FEND
+    # Load D3FEND (additive — no clear)
     d3fend = dd / "d3fend.ttl"
     if d3fend.exists():
         graph.load_file(d3fend, fmt="ttl")
 
-    # Load CAPEC
+    # Load CAPEC (additive — no clear)
     capec_nt = dd / "capec.nt"
     if capec_nt.exists():
         graph.load_file(capec_nt, fmt="nt")
@@ -182,6 +182,10 @@ def repl(
         try:
             line = input("finding> ").strip()
         except (EOFError, KeyboardInterrupt):
+            try:
+                readline.write_history_file(str(history_file))
+            except Exception:
+                pass
             console.print("\n[dim]Bye.[/dim]")
             break
         if not line:

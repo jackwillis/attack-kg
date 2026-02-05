@@ -156,6 +156,14 @@ class AttackAnalyzer:
         prompt = f"Security Finding:\n{finding}\n\n{context}\n\nAnalyze this finding."
         raw = self.llm.generate_json(prompt, system=SYSTEM_PROMPT)
 
+        if "error" in raw:
+            console.print(f"[red bold]LLM response parse failure[/red bold]")
+            return AnalysisResult(
+                finding=finding, finding_type="error",
+                techniques=[], remediations=[], detections=[],
+                kill_chain="", filtered_ids={"error": [raw.get("error", "")]},
+            )
+
         # Step 4: Validate (filter hallucinated IDs)
         filtered = {"techniques": [], "mitigations": [], "d3fend": []}
 
