@@ -21,13 +21,20 @@ class AttackGraph:
 
     def __init__(self, store_path: Path | str | None = None):
         import pyoxigraph
-        self._store = (
-            pyoxigraph.Store(str(Path(store_path).resolve()))
-            if store_path
-            else pyoxigraph.Store()
-        )
         if store_path:
             Path(store_path).mkdir(parents=True, exist_ok=True)
+            self._cap_fds()
+            self._store = pyoxigraph.Store(str(Path(store_path).resolve()))
+        else:
+            self._store = pyoxigraph.Store()
+
+    @staticmethod
+    def _cap_fds(limit: int = 8192):
+        """Cap open file descriptors to avoid pyoxigraph RocksDB i32 overflow."""
+        import resource
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        if soft > limit:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (min(limit, hard), hard))
 
     def load_file(self, path: Path | str, fmt: str = "nt", clear: bool = False) -> int:
         """Load an RDF file into the store. Always additive unless clear=True."""

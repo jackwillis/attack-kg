@@ -45,7 +45,7 @@ class TestGetBackend:
     def test_ollama_default(self):
         backend = get_backend()
         assert isinstance(backend, OllamaBackend)
-        assert backend.model == "llama3.2"
+        assert backend.model == "gpt-oss:20b"
 
     def test_ollama_custom_model(self):
         backend = get_backend("ollama", "gemma3:4b")

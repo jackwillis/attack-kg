@@ -79,8 +79,10 @@ def parse_capec(xml_path: Path) -> dict[str, Any]:
                 entry_id_el = tm.find(f"{ns_prefix}Entry_ID")
                 if entry_id_el is not None and entry_id_el.text:
                     tid = entry_id_el.text.strip()
-                    if tid.startswith("T"):
-                        capec_to_attack.setdefault(capec_id, []).append(tid)
+                    # CAPEC stores IDs without "T" prefix (e.g. "1574.010")
+                    if not tid.startswith("T"):
+                        tid = f"T{tid}"
+                    capec_to_attack.setdefault(capec_id, []).append(tid)
 
         # Extract CWE relationships
         for rel in ap.iter(f"{ns_prefix}Related_Weakness"):

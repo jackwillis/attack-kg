@@ -65,6 +65,14 @@ class TestParseCapec:
         assert "CAPEC-86" in result["capec_info"]
         assert result["capec_info"]["CAPEC-86"]["name"] == "XSS via HTTP Headers"
 
+    def test_prepends_t_prefix(self, tmp_path):
+        """Real CAPEC XML stores ATT&CK IDs without 'T' prefix."""
+        xml = _write_capec_xml(tmp_path, [
+            {"id": "86", "name": "XSS", "attack_ids": ["1059.007"]},
+        ])
+        result = parse_capec(xml)
+        assert "T1059.007" in result["capec_to_attack"]["CAPEC-86"]
+
     def test_parses_cwe_mapping(self, tmp_path):
         xml = _write_capec_xml(tmp_path, [
             {"id": "86", "name": "XSS", "cwe_ids": ["79", "80"],

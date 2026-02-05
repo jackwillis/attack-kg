@@ -127,7 +127,7 @@ def _build_analyzer(
 def analyze(
     finding: Optional[str] = typer.Argument(None, help="Finding text to analyze"),
     file: Optional[Path] = typer.Option(None, "--file", "-f", help="Read finding from file"),
-    model: str = typer.Option("llama3.2", "--model", "-m", help="LLM model name"),
+    model: str = typer.Option("gpt-oss:20b", "--model", "-m", help="LLM model name"),
     backend: str = typer.Option("ollama", "--backend", "-b", help="LLM backend (ollama|openai)"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     context_format: str = typer.Option("xml", "--context-format", "-c", help="Context format (xml|toon|json)"),
@@ -157,7 +157,7 @@ def analyze(
 
 @app.command()
 def repl(
-    model: str = typer.Option("llama3.2", "--model", "-m", help="LLM model name"),
+    model: str = typer.Option("gpt-oss:20b", "--model", "-m", help="LLM model name"),
     backend: str = typer.Option("ollama", "--backend", "-b", help="LLM backend"),
     context_format: str = typer.Option("xml", "--context-format", "-c"),
     no_hybrid: bool = typer.Option(False, "--no-hybrid"),

@@ -79,4 +79,4 @@ def _parse_json(text: str) -> dict[str, Any]:
 def get_backend(backend: str = "ollama", model: str | None = None) -> LLMBackend:
     if backend == "openai":
         return OpenAIBackend(model=model or "gpt-4o-mini")
-    return OllamaBackend(model=model or "llama3.2")
+    return OllamaBackend(model=model or "gpt-oss:20b")
