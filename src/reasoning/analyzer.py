@@ -60,8 +60,15 @@ Confidence: high (well-documented config), medium (correct approach, details var
 
 Implementation: 1-2 specific sentences. When uncertain: "Consult [product] documentation for [capability]"
 
-### STEP 6: SELF-VERIFICATION ###
-Confirm all IDs appear in provided candidates. Confirm evidence fields are exact quotes.
+### STEP 6: DETECTION (use only provided data sources) ###
+Build detection recommendations from the <datasources> section in the context.
+- Use the EXACT data source name as provided (format is "Data Source: Data Component", e.g., "Application Log: Application Log Content", "Process: Process Creation", "User Account: User Account Authentication")
+- Do NOT invent generic names like "Endpoint Process Activity" or "System Discovery Logs"
+- Each recommendation should reference a specific data source from the provided list and explain what to look for
+- Prefer data sources that cover the most selected techniques
+
+### STEP 7: SELF-VERIFICATION ###
+Confirm all IDs appear in provided candidates. Confirm evidence fields are exact quotes. Confirm data_source values match entries from the <datasources> section exactly.
 
 ### OUTPUT FORMAT ###
 Return valid JSON only.
@@ -71,7 +78,7 @@ Return valid JSON only.
     "kill_chain_analysis": "One sentence connecting techniques.",
     "remediations": [{"mitigation_id": "M1032", "name": "Multi-factor Authentication", "priority": "HIGH", "confidence": "high", "addresses": ["T1110.003"], "implementation": "Enable MFA via Conditional Access."}],
     "defend_recommendations": [{"d3fend_id": "D3-MFA", "name": "Multi-factor Authentication", "priority": "HIGH", "confidence": "medium", "addresses": ["T1110.003"], "implementation": "Deploy TOTP or FIDO2 MFA.", "via_mitigations": ["M1032"]}],
-    "detection_recommendations": [{"data_source": "Logon Session", "rationale": "Detects distributed auth failures", "techniques_covered": ["T1110.003"]}]
+    "detection_recommendations": [{"data_source": "User Account: User Account Authentication", "rationale": "Monitor for distributed authentication failures indicating password spraying", "techniques_covered": ["T1110.003"]}]
 }"""
 
 
