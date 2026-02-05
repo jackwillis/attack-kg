@@ -1,42 +1,23 @@
 [project]
 name = "attack-kg"
-version = "0.1.0"
-description = "Neuro-symbolic knowledge graph for MITRE ATT&CK threat intelligence"
-readme = "README.md"
+version = "2.0.0"
+description = "Security remediation engine powered by MITRE ATT&CK"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    # RDF / Knowledge Graph
-    "rdflib>=7.0.0",
-    "oxrdflib>=0.3.6",
-
-    # Vector Store
+    "pyoxigraph>=0.3.22",
     "chromadb>=0.4.22",
     "sentence-transformers>=2.2.2",
-    "einops>=0.7.0",  # Required by nomic-embed-text-v1.5
-    "torch>=2.0.0",  # Explicit to prevent transitive dependency issues
-
-    # LLM Integration
+    "einops>=0.7.0",
+    "torch>=2.0.0",
     "ollama>=0.1.6",
     "openai>=1.12.0",
-
-    # Data Processing
     "httpx>=0.26.0",
     "pydantic>=2.5.0",
-
-    # CLI
     "typer>=0.9.0",
     "rich>=13.7.0",
-
-    # Hybrid Search
     "rank-bm25>=0.2.2",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.4.0",
-    "pytest-asyncio>=0.23.0",
-    "ipython>=8.20.0",
-    "jupyter>=1.0.0",
+    "pyyaml>=6.0",
+    "toon-format>=0.9.0b1",
 ]
 
 [project.scripts]
@@ -51,7 +32,6 @@ packages = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 100
@@ -61,6 +41,4 @@ target-version = "py311"
 select = ["E", "F", "I", "UP"]
 
 [dependency-groups]
-dev = [
-    "pytest>=9.0.2",
-]
+dev = ["pytest>=9.0.0"]

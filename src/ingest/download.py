@@ -1,141 +1,119 @@
-"""Download MITRE ATT&CK STIX data from GitHub."""
+"""Download ATT&CK, D3FEND, LOLBAS, and GTFOBins data."""
 
-import json
 from pathlib import Path
-from typing import Any
 
 import httpx
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 
 console = Console()
 
-# MITRE ATT&CK STIX data URLs
-ATTACK_STIX_BASE = "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master"
-ENTERPRISE_ATTACK_URL = f"{ATTACK_STIX_BASE}/enterprise-attack/enterprise-attack.json"
-
-# Alternative domains (ICS, Mobile) if needed later
-ICS_ATTACK_URL = f"{ATTACK_STIX_BASE}/ics-attack/ics-attack.json"
-MOBILE_ATTACK_URL = f"{ATTACK_STIX_BASE}/mobile-attack/mobile-attack.json"
-
-
-def download_attack_data(
-    output_dir: Path | str = "data",
-    domain: str = "enterprise",
-    force: bool = False,
-) -> Path:
-    """
-    Download MITRE ATT&CK STIX bundle from GitHub.
-
-    Args:
-        output_dir: Directory to save the downloaded file
-        domain: ATT&CK domain - "enterprise", "ics", or "mobile"
-        force: Re-download even if file exists
-
-    Returns:
-        Path to the downloaded JSON file
-    """
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    urls = {
-        "enterprise": ENTERPRISE_ATTACK_URL,
-        "ics": ICS_ATTACK_URL,
-        "mobile": MOBILE_ATTACK_URL,
-    }
-
-    if domain not in urls:
-        raise ValueError(f"Unknown domain: {domain}. Must be one of: {list(urls.keys())}")
-
-    url = urls[domain]
-    output_file = output_dir / f"{domain}-attack.json"
-
-    if output_file.exists() and not force:
-        console.print(f"[green]Using cached data:[/green] {output_file}")
-        return output_file
-
-    console.print(f"[blue]Downloading ATT&CK {domain} data...[/blue]")
-
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Fetching STIX bundle...", total=None)
-
-        with httpx.Client(timeout=60.0) as client:
-            response = client.get(url)
-            response.raise_for_status()
-
-        progress.update(task, description="Writing to disk...")
-        output_file.write_text(response.text)
-
-    console.print(f"[green]Downloaded:[/green] {output_file}")
-    return output_file
+ATTACK_URL = "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master/enterprise-attack/enterprise-attack.json"
+D3FEND_URL = "https://d3fend.mitre.org/ontologies/d3fend.ttl"
+LOLBAS_API = "https://api.github.com/repos/LOLBAS-Project/LOLBAS/contents"
+LOLBAS_RAW = "https://raw.githubusercontent.com/LOLBAS-Project/LOLBAS/master"
+LOLBAS_DIRS = ["yml/OSBinaries", "yml/OSLibraries", "yml/OSScripts", "yml/OtherMSBinaries"]
+GTFOBINS_API = "https://api.github.com/repos/GTFOBins/GTFOBins.github.io/contents/_gtfobins"
+GTFOBINS_RAW = "https://raw.githubusercontent.com/GTFOBins/GTFOBins.github.io/master/_gtfobins"
 
 
-def load_stix_bundle(path: Path | str) -> dict[str, Any]:
-    """
-    Load a STIX bundle from a JSON file.
-
-    Args:
-        path: Path to the STIX JSON file
-
-    Returns:
-        Parsed STIX bundle as a dictionary
-    """
-    path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"STIX file not found: {path}")
-
-    with open(path) as f:
-        bundle = json.load(f)
-
-    # Validate it's a STIX bundle
-    if bundle.get("type") != "bundle":
-        raise ValueError(f"Expected STIX bundle, got type: {bundle.get('type')}")
-
-    return bundle
+def _fetch(url: str, client: httpx.Client, desc: str) -> bytes:
+    resp = client.get(url)
+    resp.raise_for_status()
+    return resp.content
 
 
-def get_objects_by_type(bundle: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
-    """
-    Group STIX objects by their type.
-
-    Args:
-        bundle: STIX bundle dictionary
-
-    Returns:
-        Dictionary mapping object types to lists of objects
-    """
-    objects_by_type: dict[str, list[dict[str, Any]]] = {}
-
-    for obj in bundle.get("objects", []):
-        obj_type = obj.get("type", "unknown")
-        if obj_type not in objects_by_type:
-            objects_by_type[obj_type] = []
-        objects_by_type[obj_type].append(obj)
-
-    return objects_by_type
+def download_attack(data_dir: Path, force: bool = False) -> Path:
+    out = data_dir / "enterprise-attack.json"
+    if out.exists() and not force:
+        console.print(f"[green]Cached:[/green] {out}")
+        return out
+    console.print("[blue]Downloading ATT&CK STIX data...[/blue]")
+    with httpx.Client(timeout=60.0) as c:
+        out.write_bytes(_fetch(ATTACK_URL, c, "ATT&CK"))
+    console.print(f"[green]Downloaded:[/green] {out}")
+    return out
 
 
-def print_stix_summary(bundle: dict[str, Any]) -> None:
-    """Print a summary of the STIX bundle contents."""
-    objects_by_type = get_objects_by_type(bundle)
-
-    console.print("\n[bold]STIX Bundle Summary[/bold]")
-    console.print(f"  Spec version: {bundle.get('spec_version', 'unknown')}")
-    console.print(f"  Bundle ID: {bundle.get('id', 'unknown')}")
-    console.print(f"\n[bold]Object counts by type:[/bold]")
-
-    # Sort by count descending
-    sorted_types = sorted(objects_by_type.items(), key=lambda x: -len(x[1]))
-    for obj_type, objects in sorted_types:
-        console.print(f"  {obj_type}: {len(objects)}")
+def download_d3fend(data_dir: Path, force: bool = False) -> Path:
+    out = data_dir / "d3fend.ttl"
+    if out.exists() and not force:
+        console.print(f"[green]Cached:[/green] {out}")
+        return out
+    console.print("[blue]Downloading D3FEND ontology...[/blue]")
+    with httpx.Client(timeout=60.0) as c:
+        out.write_bytes(_fetch(D3FEND_URL, c, "D3FEND"))
+    console.print(f"[green]Downloaded:[/green] {out}")
+    return out
 
 
-if __name__ == "__main__":
-    # Quick test
-    data_file = download_attack_data()
-    bundle = load_stix_bundle(data_file)
-    print_stix_summary(bundle)
+def download_lolbas(data_dir: Path, force: bool = False) -> Path:
+    lolbas_dir = data_dir / "lolbas"
+    marker = lolbas_dir / ".downloaded"
+    if marker.exists() and not force:
+        console.print(f"[green]Cached:[/green] {lolbas_dir}")
+        return lolbas_dir
+    lolbas_dir.mkdir(parents=True, exist_ok=True)
+    console.print("[blue]Downloading LOLBAS data...[/blue]")
+    count, errors = 0, 0
+    with httpx.Client(timeout=30.0) as client:
+        files: list[tuple[str, str]] = []
+        for subdir in LOLBAS_DIRS:
+            try:
+                resp = client.get(f"{LOLBAS_API}/{subdir}")
+                resp.raise_for_status()
+                for f in resp.json():
+                    if isinstance(f, dict) and f.get("name", "").endswith((".yml", ".yaml")):
+                        files.append((subdir, f["name"]))
+            except Exception as e:
+                console.print(f"[yellow]Listing {subdir}: {e}[/yellow]")
+        with Progress(SpinnerColumn(), TextColumn("{task.description}"), BarColumn(),
+                      TextColumn("{task.completed}/{task.total}"), console=console) as prog:
+            task = prog.add_task("LOLBAS files", total=len(files))
+            for subdir, name in files:
+                try:
+                    resp = client.get(f"{LOLBAS_RAW}/{subdir}/{name}")
+                    resp.raise_for_status()
+                    safe = subdir.replace("/", "_")
+                    (lolbas_dir / f"{safe}_{name}").write_text(resp.text)
+                    count += 1
+                except Exception:
+                    errors += 1
+                prog.update(task, advance=1)
+    marker.write_text(f"{count}")
+    console.print(f"[green]Downloaded {count} LOLBAS files[/green] (errors: {errors})")
+    return lolbas_dir
+
+
+def download_gtfobins(data_dir: Path, force: bool = False) -> Path:
+    gtfo_dir = data_dir / "gtfobins"
+    marker = gtfo_dir / ".downloaded"
+    if marker.exists() and not force:
+        console.print(f"[green]Cached:[/green] {gtfo_dir}")
+        return gtfo_dir
+    gtfo_dir.mkdir(parents=True, exist_ok=True)
+    console.print("[blue]Downloading GTFOBins data...[/blue]")
+    count, errors = 0, 0
+    with httpx.Client(timeout=30.0) as client:
+        try:
+            resp = client.get(GTFOBINS_API)
+            resp.raise_for_status()
+            files = [f["name"] for f in resp.json() if isinstance(f, dict) and f.get("type") == "file"]
+        except Exception as e:
+            console.print(f"[red]Listing GTFOBins: {e}[/red]")
+            return gtfo_dir
+        with Progress(SpinnerColumn(), TextColumn("{task.description}"), BarColumn(),
+                      TextColumn("{task.completed}/{task.total}"), console=console) as prog:
+            task = prog.add_task("GTFOBins files", total=len(files))
+            for name in files:
+                try:
+                    resp = client.get(f"{GTFOBINS_RAW}/{name}")
+                    resp.raise_for_status()
+                    (gtfo_dir / name).write_text(resp.text)
+                    count += 1
+                except Exception:
+                    errors += 1
+                prog.update(task, advance=1)
+    marker.write_text(f"{count}")
+    console.print(f"[green]Downloaded {count} GTFOBins files[/green] (errors: {errors})")
+    return gtfo_dir
