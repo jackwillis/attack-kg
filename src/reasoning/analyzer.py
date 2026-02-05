@@ -246,11 +246,21 @@ class AttackAnalyzer:
             else:
                 filtered["mitigations"].append(mid)
 
+        # Build valid data source names from the context
+        valid_ds_names = set()
+        for tech in result.techniques:
+            for ds in tech.data_sources:
+                valid_ds_names.add(ds)
+
         detections = []
         for d in raw.get("detection_recommendations", []):
+            ds_name = d.get("data_source", "")
+            if valid_ds_names and ds_name not in valid_ds_names:
+                filtered.setdefault("data_sources", []).append(ds_name)
+                continue
             covered = [t for t in d.get("techniques_covered", []) if t in identified_ids]
             detections.append(Detection(
-                data_source=d.get("data_source", ""),
+                data_source=ds_name,
                 rationale=d.get("rationale", ""),
                 techniques_covered=covered,
             ))

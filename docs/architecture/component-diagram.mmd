@@ -9,7 +9,9 @@ graph LR
         M1["Mitigations<br/><i>course-of-action</i>"]
         TC["Tactics<br/><i>kill-chain-phase</i>"]
         DS["Data Sources<br/><i>x-mitre-data-source</i>"]
+        DC["Data Components<br/><i>x-mitre-data-component</i>"]
         DET["Detection Strategies<br/><i>x-mitre-detection-strategy</i>"]
+        AN["Analytics<br/><i>x-mitre-analytic</i>"]
         CAM["Campaigns<br/><i>campaign</i>"]
     end
 
@@ -50,6 +52,8 @@ graph LR
         R5["d3f:counters"]
         R6["attack:mapsToCAPEC"]
         R7["attack:mapsToTechnique"]
+        R8["attack:detects"]
+        R9["attack:dataSource<br/><i>propagated via chain</i>"]
     end
 
     subgraph Queries["Query Capabilities"]
@@ -79,6 +83,13 @@ graph LR
     CAP --- R7
     T1 --- R7
 
+    DET --- R8
+    T1 --- R8
+    DET --- AN
+    AN --- DC
+    DC --- R9
+    T1 --- R9
+
     R1 --> Q1
     R1 --> Q2
     R2 --> Q3
@@ -90,13 +101,13 @@ graph LR
     R6 --> Q7
     R7 --> Q7
     Q7 --> Q5
+    R9 --> Q5
 
     RT --> Q4
     PD --> Q4
     VK --> Q4
     LB --> Q4
     GT --> Q4
-    DS --> Q5
     DET --> Q5
 
     classDef entity fill:#E8F4F8,stroke:#4A90A4
@@ -107,10 +118,10 @@ graph LR
     classDef capec fill:#F0E6FF,stroke:#7B2D8E
     classDef router fill:#FCE4EC,stroke:#E91E63
 
-    class T1,G1,S1,M1,TC,DS,DET,CAM entity
+    class T1,G1,S1,M1,TC,DS,DC,DET,AN,CAM entity
     class D1,D2 defense
     class LB,GT external
-    class R1,R2,R3,R4,R5,R6,R7 relation
+    class R1,R2,R3,R4,R5,R6,R7,R8,R9 relation
     class Q1,Q2,Q3,Q4,Q5,Q6,Q7 query
     class CWE,CAP capec
     class RT,PD router

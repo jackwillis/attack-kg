@@ -18,7 +18,8 @@ flowchart TB
         subgraph Converter["StixToRdfConverter"]
             direction LR
             P1["Pass 1: Entities<br/><i>Techniques, Groups, Software,<br/>Mitigations, Campaigns, Tactics,<br/>Data Sources, Data Components,<br/>Detection Strategies, Analytics</i>"]
-            P2["Pass 2: Relationships<br/><i>uses, mitigates, subtechniqueOf,<br/>detects, attributedTo, targets</i>"]
+            DSC["Data Source Chain<br/><i>DetStrategy → Analytics<br/>→ LogSourceRefs → DataComponent<br/>→ dataSource triples on techniques</i>"]
+            P2["Pass 2: Relationships<br/><i>uses, mitigates, subtechniqueOf,<br/>detects + dataSource propagation,<br/>attributedTo</i>"]
         end
 
         subgraph ExtParsers["External Source Parsers"]
@@ -60,7 +61,7 @@ flowchart TB
             OPENAI["OpenAIBackend<br/><i>Cloud LLM</i>"]
         end
         ENC["Context Encoder<br/><i>encoder.py</i><br/>XML (default), TOON, JSON"]
-        ANALYZER["AttackAnalyzer<br/><i>analyzer.py</i><br/>Single-stage analysis"]
+        ANALYZER["AttackAnalyzer<br/><i>analyzer.py</i><br/>Single-stage analysis<br/>+ ID & data source validation"]
     end
 
     subgraph Interface["User Interface"]
@@ -77,7 +78,8 @@ flowchart TB
     DL --> STIX
     DL --> ExtParsers
     STIX --> Converter
-    P1 --> P2
+    P1 --> DSC
+    DSC --> P2
     Converter --> RDF
     CP --> RDF
     RDF --> OXI

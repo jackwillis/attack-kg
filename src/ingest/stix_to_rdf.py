@@ -53,6 +53,8 @@ class StixToNTriples:
     def __init__(self):
         self.stix_to_uri: dict[str, str] = {}
         self._triples: list[str] = []
+        # Detection strategy → data component names chain (built between passes)
+        self._detstrat_dc_names: dict[str, set[str]] = {}
 
     def _add(self, s: str, p: str, o: str):
         self._triples.append(_triple(s, p, o))
@@ -78,6 +80,10 @@ class StixToNTriples:
                 if not obj.get("revoked") and not obj.get("x_mitre_deprecated"):
                     self._process_entity(obj)
                 prog.advance(task)
+
+        # Build detection strategy → data component names chain
+        # (needed before relationship processing to populate dataSource triples)
+        self._build_datasource_chain(objects)
 
         with Progress(TextColumn("{task.description}"), BarColumn(),
                       TaskProgressColumn(), console=console) as prog:
@@ -216,6 +222,38 @@ class StixToNTriples:
             aid = obj["id"].split("--")[1][:8]
         self._base_entity(obj, f"{A}analytic/{aid}", "Analytic")
 
+    def _build_datasource_chain(self, objects: list[dict]):
+        """Build detection_strategy → data component names via analytics chain.
+
+        STIX 2.1 chain: detection_strategy → x_mitre_analytic_refs → analytics
+        → x_mitre_log_source_references → x_mitre_data_component_ref → data component name.
+        """
+        dc_names: dict[str, str] = {}
+        for obj in objects:
+            if obj.get("type") == "x-mitre-data-component" and not obj.get("revoked"):
+                dc_names[obj["id"]] = obj.get("name", "")
+
+        analytic_dcs: dict[str, set[str]] = {}
+        for obj in objects:
+            if obj.get("type") == "x-mitre-analytic" and not obj.get("x_mitre_deprecated"):
+                names: set[str] = set()
+                for ls in obj.get("x_mitre_log_source_references", []):
+                    dc_ref = ls.get("x_mitre_data_component_ref", "")
+                    if dc_ref in dc_names:
+                        names.add(dc_names[dc_ref])
+                analytic_dcs[obj["id"]] = names
+
+        for obj in objects:
+            if obj.get("type") == "x-mitre-detection-strategy" and not obj.get("x_mitre_deprecated"):
+                names = set()
+                for aref in obj.get("x_mitre_analytic_refs", []):
+                    names.update(analytic_dcs.get(aref, set()))
+                if names:
+                    self._detstrat_dc_names[obj["id"]] = names
+
+        total_dc = sum(len(v) for v in self._detstrat_dc_names.values())
+        console.print(f"[dim]Data source chain: {len(self._detstrat_dc_names)} strategies → {total_dc} data component links[/dim]")
+
     def _process_relationship(self, rel: dict):
         src = self.stix_to_uri.get(rel.get("source_ref", ""))
         tgt = self.stix_to_uri.get(rel.get("target_ref", ""))
@@ -238,6 +276,12 @@ class StixToNTriples:
         inv = inverses.get(rel.get("relationship_type"))
         if inv:
             self._add(tgt, f"{A}{inv}", src)
+
+        # For detects relationships, propagate data component names to technique
+        if rel.get("relationship_type") == "detects":
+            src_stix = rel.get("source_ref", "")
+            for dc_name in self._detstrat_dc_names.get(src_stix, set()):
+                self._add_lit(tgt, f"{A}dataSource", dc_name)
 
     def save(self, path: Path | str):
         path = Path(path)
