@@ -18,19 +18,11 @@ SYSTEM_PROMPT = """You are a senior cybersecurity analyst specializing in MITRE 
 Analyze the security finding using the provided candidate techniques, mitigations, and D3FEND countermeasures. Think through each step systematically before producing output.
 
 ### STEP 1: CONTEXT EXTRACTION ###
-Extract environmental context from the finding text:
-| Indicator | Platform |
-|-----------|----------|
-| /var/www, systemd, apt, apache2, nginx | Linux |
-| C:\\, PowerShell, IIS, .exe, Registry | Windows |
-| AWS, Azure, GCP, Lambda, S3 | Cloud |
-
-Note specific products mentioned (FortiOS, ownCloud, Azure AD, etc.).
+Note specific products mentioned in the finding (FortiOS, ownCloud, Azure AD, etc.). Use candidate technique platforms (plat attribute) for environmental context.
 RULES:
 - Reference OS-native capabilities freely (auditd, iptables, Windows Event Logging, Group Policy)
 - Strongly prefer products explicitly mentioned in the finding
 - For third-party tools (CrowdStrike, Splunk, Okta), only reference if mentioned in the finding
-- Generic guidance ("enable MFA", "implement segmentation") is always acceptable
 
 ### STEP 2: CLASSIFY FINDING TYPE ###
 - "attack_narrative": Past-tense actions, IOCs, log entries showing completed attacker activity
