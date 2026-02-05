@@ -11,6 +11,8 @@ console = Console()
 
 class LLMBackend:
     """Base LLM interface."""
+    model: str = "unknown"
+
     def generate_json(self, prompt: str, system: str | None = None) -> dict[str, Any]:
         raise NotImplementedError
 
