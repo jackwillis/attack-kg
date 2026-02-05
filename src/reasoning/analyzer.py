@@ -291,10 +291,13 @@ class AttackAnalyzer:
         if not techniques:
             return mitigations, d3fend
 
-        # Top 3 techniques by similarity are the "focus set"
-        focus_ids = {t.attack_id for t in sorted(
-            techniques, key=lambda t: t.similarity, reverse=True,
-        )[:3]}
+        # Focus set: top 3 techniques by similarity, or all if ≤5 total
+        if len(techniques) <= 5:
+            focus_ids = {t.attack_id for t in techniques}
+        else:
+            focus_ids = {t.attack_id for t in sorted(
+                techniques, key=lambda t: t.similarity, reverse=True,
+            )[:3]}
 
         # Score mitigations: +2 for each focus technique addressed, +1 for others
         def mit_score(m: dict) -> int:

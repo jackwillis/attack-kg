@@ -19,6 +19,40 @@ console = Console()
 CVE_PATTERN = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.IGNORECASE)
 CWE_PATTERN = re.compile(r"\bCWE-\d{1,4}\b", re.IGNORECASE)
 
+# Vulnerability keyword → ATT&CK technique mapping.
+# Bridges the vocabulary gap where CAPEC has no path (only 27% of techniques
+# have CAPEC mappings). Each entry maps a regex pattern (case-insensitive) to
+# one or more technique IDs that should be injected as candidates.
+VULN_KEYWORD_TECHNIQUES: list[tuple[re.Pattern, list[str]]] = [
+    # Authentication / access control
+    (re.compile(r"authenticat\w*\s+bypass|bypass\w*\s+authenticat", re.I), ["T1190", "T1078"]),
+    (re.compile(r"improper\s+authenticat|missing\s+authenticat", re.I), ["T1190", "T1078"]),
+    (re.compile(r"SSO\s+(bypass|vulnerab|flaw)", re.I), ["T1190", "T1550"]),
+    (re.compile(r"unauthorized\s+(access|admin)", re.I), ["T1190", "T1078"]),
+    (re.compile(r"privilege\s+escalat", re.I), ["T1068", "T1548"]),
+    (re.compile(r"improper\s+access\s+control", re.I), ["T1190", "T1068"]),
+    # Injection
+    (re.compile(r"SQL\s+injection|\bSQLi\b", re.I), ["T1190", "T1059"]),
+    (re.compile(r"command\s+injection|OS\s+command", re.I), ["T1190", "T1059"]),
+    (re.compile(r"code\s+injection|remote\s+code\s+execut|\bRCE\b", re.I), ["T1190", "T1203"]),
+    (re.compile(r"cross.site\s+script|\bXSS\b", re.I), ["T1190", "T1059.007"]),
+    (re.compile(r"server.side\s+request\s+forgery|\bSSRF\b", re.I), ["T1190", "T1557"]),
+    (re.compile(r"deserialization", re.I), ["T1190", "T1203"]),
+    # File / path
+    (re.compile(r"path\s+traversal|directory\s+traversal|\.\.\/", re.I), ["T1190", "T1083"]),
+    (re.compile(r"arbitrary\s+file\s+(upload|write|read)", re.I), ["T1190", "T1105"]),
+    # Memory corruption
+    (re.compile(r"buffer\s+overflow|heap\s+overflow|stack\s+overflow", re.I), ["T1190", "T1203"]),
+    (re.compile(r"use.after.free|double.free|memory\s+corrupt", re.I), ["T1190", "T1203"]),
+    # Network appliance / public-facing
+    (re.compile(r"(FortiOS|FortiGate|FortiProxy|FortiManager|FortiAnalyzer)", re.I), ["T1190"]),
+    (re.compile(r"(Citrix|Pulse\s+Secure|Ivanti|PAN-OS|Palo\s+Alto|SonicWall)", re.I), ["T1190"]),
+    (re.compile(r"(VPN|firewall|load\s+balancer|gateway)\s+vulnerab", re.I), ["T1190"]),
+    # Credential exposure
+    (re.compile(r"credential\s+(leak|expos|disclos)", re.I), ["T1552", "T1078"]),
+    (re.compile(r"hardcoded\s+(password|credential|secret)", re.I), ["T1552.001", "T1078"]),
+]
+
 
 @dataclass
 class EnrichedTechnique:
@@ -97,6 +131,11 @@ class HybridQueryEngine:
         if cwe_techniques:
             combined = self._inject_cwe_techniques(combined, cwe_techniques)
 
+        # Step 4c: Vulnerability keyword → technique injection
+        vuln_techniques = self._extract_vuln_keyword_techniques(question)
+        if vuln_techniques:
+            combined = self._inject_vuln_techniques(combined, vuln_techniques)
+
         # Step 5: Take top_k and enrich
         top = combined[:top_k]
         techniques = []
@@ -115,6 +154,8 @@ class HybridQueryEngine:
             mode += "+cooccurrence"
         if cwe_techniques:
             mode += "+cwe"
+        if vuln_techniques:
+            mode += "+vuln_kw"
         return QueryResult(query=question, techniques=techniques,
                            metadata={"top_k": top_k, "mode": mode, "count": len(techniques)})
 
@@ -189,6 +230,25 @@ class HybridQueryEngine:
         combined.sort(key=lambda x: x.get("rrf_score", 0), reverse=True)
         return combined[:top_k * 2]
 
+    def _extract_vuln_keyword_techniques(self, text: str) -> list[dict]:
+        """Map vulnerability keywords to ATT&CK techniques via lookup table.
+
+        Covers the gap where CAPEC has no mappings (73% of techniques).
+        """
+        techniques: list[dict] = []
+        seen: set[str] = set()
+        matched_patterns: list[str] = []
+        for pattern, tech_ids in VULN_KEYWORD_TECHNIQUES:
+            if pattern.search(text):
+                matched_patterns.append(pattern.pattern[:40])
+                for tid in tech_ids:
+                    if tid not in seen:
+                        seen.add(tid)
+                        techniques.append({"attack_id": tid, "name": tid})
+        if techniques:
+            console.print(f"[blue]Vuln keyword mapping: {len(techniques)} techniques[/blue]")
+        return techniques
+
     def _extract_cwe_techniques(self, text: str) -> list[dict]:
         """Extract CWE IDs from text and map to ATT&CK techniques via CAPEC."""
         cwes = CWE_PATTERN.findall(text)
@@ -227,6 +287,38 @@ class HybridQueryEngine:
                     "attack_id": aid, "name": t.get("name", aid),
                     "rrf_score": 0.01 * boost,
                     "cwe_boost": True,
+                })
+        combined.sort(key=lambda x: x.get("rrf_score", 0), reverse=True)
+        return combined
+
+    def _inject_vuln_techniques(
+        self, combined: list[dict], vuln_techniques: list[dict],
+        boost: float = 1.3,
+    ) -> list[dict]:
+        """Inject vulnerability-keyword-matched techniques with competitive scores.
+
+        Unlike CWE injection (speculative, low base score), keyword matches are
+        high-confidence domain knowledge — give them a score that competes with
+        semantic results so they survive the top_k cut.
+        """
+        # Use median RRF score of current candidates as the base
+        rrf_scores = [item.get("rrf_score", 0) for item in combined if item.get("rrf_score", 0) > 0]
+        base = sorted(rrf_scores)[len(rrf_scores) // 2] if rrf_scores else 0.5
+
+        existing = {item["attack_id"] for item in combined}
+        for t in vuln_techniques:
+            aid = t["attack_id"]
+            if aid in existing:
+                for item in combined:
+                    if item["attack_id"] == aid:
+                        item["rrf_score"] = item.get("rrf_score", 0) * boost
+                        item["vuln_kw_boost"] = True
+                        break
+            else:
+                combined.append({
+                    "attack_id": aid, "name": t.get("name", aid),
+                    "rrf_score": base * boost,
+                    "vuln_kw_boost": True,
                 })
         combined.sort(key=lambda x: x.get("rrf_score", 0), reverse=True)
         return combined
