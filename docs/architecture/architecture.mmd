@@ -1,0 +1,119 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4A90A4', 'secondaryColor': '#E8F4F8', 'tertiaryColor': '#F5F5F5', 'primaryTextColor': '#333', 'lineColor': '#666'}}}%%
+
+flowchart TB
+    subgraph External["External Data Sources"]
+        direction TB
+        MITRE["MITRE ATT&CK<br/>GitHub Repository"]
+        D3FEND["MITRE D3FEND<br/>Defensive Ontology"]
+        CAPEC["MITRE CAPEC<br/>Attack Patterns + CWE"]
+        LOLBAS["LOLBAS<br/>Windows LOLBins"]
+        GTFO["GTFOBins<br/>Linux Binaries"]
+    end
+
+    subgraph Ingestion["Data Ingestion Pipeline"]
+        direction TB
+        DL["download.py<br/><i>HTTP GET with progress</i>"]
+        STIX["enterprise-attack.json<br/><i>STIX 2.1 Bundle (~50MB)</i>"]
+
+        subgraph Converter["StixToRdfConverter"]
+            direction LR
+            P1["Pass 1: Entities<br/><i>Techniques, Groups, Software,<br/>Mitigations, Campaigns, Tactics,<br/>Data Sources, Data Components,<br/>Detection Strategies, Analytics</i>"]
+            P2["Pass 2: Relationships<br/><i>uses, mitigates, subtechniqueOf,<br/>detects, attributedTo, targets</i>"]
+        end
+
+        subgraph ExtParsers["External Source Parsers"]
+            direction LR
+            LB["lolbas.py<br/><i>YAML parsing</i>"]
+            GT["gtfobins.py<br/><i>Markdown parsing</i>"]
+            CP["capec.py<br/><i>XML parsing<br/>CWE→CAPEC→ATT&CK</i>"]
+        end
+
+        RDF["attack.nt + capec.nt<br/><i>RDF N-Triples<br/>(74K+ triples)</i>"]
+        EMB["embeddings.py<br/><i>sentence-transformers<br/>nomic-embed-text-v1.5<br/>+LOLBAS/GTFOBins</i>"]
+    end
+
+    subgraph Storage["Persistent Storage Layer"]
+        direction LR
+        OXI[("Oxigraph<br/><i>SPARQL Engine</i><br/>Structured Queries")]
+        CHROMA[("ChromaDB<br/><i>Vector Store</i><br/>Semantic Search")]
+    end
+
+    subgraph Store["Store + Query Modules"]
+        direction LR
+        AG["AttackGraph<br/><i>graph.py</i><br/>SPARQL queries,<br/>Mitigation inheritance,<br/>CWE/CAPEC mapping"]
+        SS["SemanticSearch<br/><i>semantic.py</i>"]
+        KW["KeywordSearch<br/><i>keyword.py</i><br/>BM25"]
+    end
+
+    subgraph Query["HybridQueryEngine (engine.py)"]
+        direction TB
+        HYB["<b>Neuro-Symbolic Core</b><br/>RRF Fusion + Co-occurrence<br/>+ Platform Boosting<br/>+ CWE/CAPEC Injection"]
+    end
+
+    subgraph Reasoning["Reasoning Module"]
+        direction TB
+        subgraph LLMBackends["LLM Backends"]
+            direction LR
+            OLLAMA["OllamaBackend<br/><i>Local LLM</i>"]
+            OPENAI["OpenAIBackend<br/><i>Cloud LLM</i>"]
+        end
+        ENC["Context Encoder<br/><i>encoder.py</i><br/>XML (default), TOON, JSON"]
+        ANALYZER["AttackAnalyzer<br/><i>analyzer.py</i><br/>Single-stage analysis"]
+    end
+
+    subgraph Interface["User Interface"]
+        CLI["Typer CLI<br/><i>main.py</i><br/>download, ingest, build,<br/>analyze, repl"]
+        REPL["Interactive REPL<br/><i>readline</i>"]
+    end
+
+    %% Data Flow
+    MITRE --> DL
+    D3FEND --> DL
+    CAPEC --> DL
+    LOLBAS --> DL
+    GTFO --> DL
+    DL --> STIX
+    DL --> ExtParsers
+    STIX --> Converter
+    P1 --> P2
+    Converter --> RDF
+    CP --> RDF
+    RDF --> OXI
+    STIX --> EMB
+    LB --> EMB
+    GT --> EMB
+    EMB --> CHROMA
+
+    %% Store connections
+    OXI <--> AG
+    CHROMA <--> SS
+
+    %% Query connections
+    AG --> HYB
+    SS --> HYB
+    KW --> HYB
+
+    %% Reasoning connections
+    HYB --> ENC
+    ENC --> ANALYZER
+    OLLAMA --> ANALYZER
+    OPENAI --> ANALYZER
+
+    %% Interface connections
+    ANALYZER --> CLI
+    HYB --> CLI
+    AG --> CLI
+    CLI <--> REPL
+
+    %% Styling
+    classDef external fill:#FFE4B5,stroke:#D4A574,stroke-width:2px
+    classDef storage fill:#E8F4F8,stroke:#4A90A4,stroke-width:2px
+    classDef core fill:#D4EDDA,stroke:#28A745,stroke-width:2px
+    classDef llm fill:#F8D7DA,stroke:#DC3545,stroke-width:2px
+    classDef interface fill:#E2E3E5,stroke:#6C757D,stroke-width:2px
+
+    class MITRE,D3FEND,CAPEC,LOLBAS,GTFO external
+    class OXI,CHROMA storage
+    class HYB,ENC core
+    class OLLAMA,OPENAI,ANALYZER llm
+    class CLI,REPL interface

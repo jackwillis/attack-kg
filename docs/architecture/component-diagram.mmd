@@ -1,0 +1,101 @@
+%%{init: {'theme': 'base'}}%%
+
+graph LR
+    subgraph KB["Knowledge Base (800+ Techniques)"]
+        direction TB
+        T1["Techniques<br/><i>attack-pattern</i>"]
+        G1["Groups<br/><i>intrusion-set</i>"]
+        S1["Software<br/><i>malware/tool</i>"]
+        M1["Mitigations<br/><i>course-of-action</i>"]
+        TC["Tactics<br/><i>kill-chain-phase</i>"]
+        DS["Data Sources<br/><i>x-mitre-data-source</i>"]
+        DET["Detection Strategies<br/><i>x-mitre-detection-strategy</i>"]
+        CAM["Campaigns<br/><i>campaign</i>"]
+    end
+
+    subgraph CAPEC_KB["CAPEC / CWE Mappings"]
+        direction TB
+        CWE["CWE Weaknesses<br/><i>CWE-79, CWE-307, ...</i>"]
+        CAP["CAPEC Patterns<br/><i>CAPEC-86, CAPEC-112, ...</i>"]
+    end
+
+    subgraph D3F["D3FEND (500+ Techniques)"]
+        direction TB
+        D1["Defensive Techniques<br/><i>d3f:DefensiveTechnique</i>"]
+        D2["Digital Artifacts<br/><i>d3f:DigitalArtifact</i>"]
+    end
+
+    subgraph ExtSources["External Tool Mappings"]
+        direction TB
+        LB["LOLBAS<br/><i>Windows LOLBins</i><br/>certutil, mshta, etc."]
+        GT["GTFOBins<br/><i>Linux Binaries</i><br/>curl, wget, etc."]
+    end
+
+    subgraph Relations["RDF Relationships"]
+        direction TB
+        R1["attack:uses"]
+        R2["attack:mitigates"]
+        R3["attack:subtechniqueOf"]
+        R4["attack:tactic"]
+        R5["d3f:counters"]
+        R6["attack:mapsToCAPEC"]
+        R7["attack:mapsToTechnique"]
+    end
+
+    subgraph Queries["Query Capabilities"]
+        direction TB
+        Q1["Technique Lookup<br/><i>get_technique(T1110.003)</i>"]
+        Q2["Group Analysis<br/><i>get_groups_for_technique()</i>"]
+        Q3["Mitigation Mapping<br/><i>get_mitigations_with_inheritance()</i>"]
+        Q4["Hybrid Search<br/><i>BM25 + Semantic + RRF</i>"]
+        Q5["Single-Stage Analysis<br/><i>AttackAnalyzer</i>"]
+        Q6["D3FEND Countermeasures<br/><i>get_d3fend_for_technique()</i>"]
+        Q7["CWE/CAPEC Mapping<br/><i>CWE → CAPEC → Technique</i>"]
+    end
+
+    T1 --- R1
+    G1 --- R1
+    S1 --- R1
+    CAM --- R1
+    T1 --- R2
+    M1 --- R2
+    T1 --- R3
+    T1 --- R4
+    TC --- R4
+    D1 --- R5
+    M1 --- R5
+    CWE --- R6
+    CAP --- R6
+    CAP --- R7
+    T1 --- R7
+
+    R1 --> Q1
+    R1 --> Q2
+    R2 --> Q3
+    R3 --> Q1
+    R4 --> Q4
+    Q1 --> Q5
+    Q4 --> Q5
+    R5 --> Q6
+    R6 --> Q7
+    R7 --> Q7
+    Q7 --> Q5
+
+    LB --> Q4
+    GT --> Q4
+    DS --> Q5
+    DET --> Q5
+
+    classDef entity fill:#E8F4F8,stroke:#4A90A4
+    classDef defense fill:#D4EDDA,stroke:#28A745
+    classDef external fill:#FFE4B5,stroke:#D4A574
+    classDef relation fill:#FFF3CD,stroke:#FFC107
+    classDef query fill:#E2E3E5,stroke:#6C757D
+    classDef capec fill:#F0E6FF,stroke:#7B2D8E
+
+    class T1,G1,S1,M1,TC,DS,DET,CAM entity
+    class D1,D2 defense
+    class LB,GT external
+    class R1,R2,R3,R4,R5,R6,R7 relation
+    class Q1,Q2,Q3,Q4,Q5,Q6,Q7 query
+    class CWE,CAP capec

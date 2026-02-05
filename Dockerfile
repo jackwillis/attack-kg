@@ -31,7 +31,7 @@ WORKDIR /app
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-COPY pyproject.toml uv.lock README.md ./
+COPY pyproject.toml uv.lock ./
 COPY src/ ./src/
 
 # Install deps, swap torch for CPU-only, build knowledge graph
@@ -55,7 +55,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /root/.attack_kg /root/.attack_kg
 COPY --from=builder /root/.cache/huggingface /root/.cache/huggingface
-COPY --from=builder /app/pyproject.toml /app/uv.lock /app/README.md ./
+COPY --from=builder /app/pyproject.toml /app/uv.lock ./
 COPY --from=builder /app/src /app/src
 
 # Force offline mode - use only cached models, no runtime downloads

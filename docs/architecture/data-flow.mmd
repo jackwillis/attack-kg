@@ -1,0 +1,67 @@
+%%{init: {'theme': 'base'}}%%
+
+sequenceDiagram
+    autonumber
+    participant User
+    participant CLI as CLI (main.py)
+    participant Hybrid as HybridQueryEngine
+    participant Vectors as ChromaDB
+    participant BM25 as KeywordSearch
+    participant Graph as Oxigraph
+    participant LLM as LLM Backend
+
+    Note over User,LLM: Query Flow: "Found password spraying attack"
+
+    User->>CLI: analyze "Found password spraying attack"
+    CLI->>Hybrid: query(narrative, top_k=5)
+
+    rect rgb(230, 245, 255)
+        Note over Hybrid,BM25: Step 1: Hybrid Retrieval (RRF + Co-occurrence)<br/>Includes ATT&CK + LOLBAS + GTFOBins
+        Hybrid->>Vectors: embed(narrative)
+        Vectors-->>Hybrid: semantic candidates + similarity scores
+        Hybrid->>BM25: tokenize + search(narrative)
+        BM25-->>Hybrid: keyword candidates + BM25 scores
+        Note over Hybrid: Reciprocal Rank Fusion<br/>score = Σ 1/(k + rank)
+        Hybrid->>Graph: get_cooccurring_techniques(top_3)
+        Graph-->>Hybrid: co-occurring techniques (campaigns 1.5x, groups 1.0x)
+        Note over Hybrid: Boost by weighted co-occurrence<br/>with time-decay on campaign age
+        Hybrid-->>Hybrid: re-ranked candidates [T1110.003, T1078, ...]
+    end
+
+    rect rgb(255, 245, 230)
+        Note over Hybrid,Graph: Step 2: CWE/CAPEC Injection + Platform Boosting
+        Hybrid->>Hybrid: Detect CWE-nnn patterns in finding text
+        Hybrid->>Graph: get_techniques_for_cwe(CWE-nnn)
+        Graph-->>Hybrid: CWE → CAPEC → ATT&CK techniques
+        Hybrid->>Hybrid: Detect platforms (Windows, Linux, Cloud, etc.)
+        Note over Hybrid: Boost techniques matching<br/>detected platforms (1.2x)
+    end
+
+    rect rgb(230, 255, 230)
+        Note over Hybrid,Graph: Step 3: Symbolic Enrichment (SPARQL)
+        loop For each candidate technique
+            Hybrid->>Graph: get_technique(id)
+            Graph-->>Hybrid: technique details + tactics
+            Hybrid->>Graph: get_software_for_technique(id)
+            Graph-->>Hybrid: [Cobalt Strike, Mimikatz, ...]
+            Hybrid->>Graph: get_mitigations_with_inheritance(id)
+            Graph-->>Hybrid: [M1032, M1027, ...] (direct + inherited)
+            Hybrid->>Graph: get_d3fend_for_technique(id)
+            Graph-->>Hybrid: [D3-MFA, D3-IOPR, ...]
+            Hybrid->>Graph: get_detection_strategies(id)
+            Graph-->>Hybrid: detection approaches
+        end
+    end
+
+    Hybrid-->>CLI: EnrichedTechnique[]
+
+    rect rgb(255, 230, 230)
+        Note over CLI,LLM: Step 4: Single-Stage LLM Analysis
+        CLI->>CLI: Build context (XML default, or TOON/JSON)
+        CLI->>LLM: analyze(narrative, encoded_context)
+        Note right of LLM: Classify techniques + write remediation<br/>Constrained to provided candidates<br/>Output: techniques, mitigations, D3FEND
+        LLM-->>CLI: AnalysisResult JSON
+        CLI->>CLI: Validate IDs against retrieval set
+    end
+
+    CLI-->>User: AnalysisResult<br/>{techniques, remediations, detections, d3fend}

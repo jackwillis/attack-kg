@@ -1,0 +1,77 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4A90A4'}}}%%
+
+sequenceDiagram
+    autonumber
+    participant User
+    participant CLI
+    participant HybridEngine as HybridQueryEngine
+    participant Semantic as SemanticSearch
+    participant ChromaDB
+    participant Keyword as KeywordSearch
+    participant Graph as AttackGraph
+    participant Oxigraph
+    participant LLM as AttackAnalyzer + LLM
+
+    User->>CLI: analyze "password spraying attack"
+    CLI->>HybridEngine: query(finding_text, top_k=5)
+
+    rect rgb(232, 244, 248)
+        Note over HybridEngine,Keyword: Hybrid Retrieval - RRF Fusion<br/>(ATT&CK + LOLBAS + GTFOBins)
+        HybridEngine->>Semantic: search(finding_text)
+        Semantic->>ChromaDB: query(embedding, n_results=10)
+        ChromaDB-->>Semantic: semantic candidates + similarity scores<br/>+ tool→technique mappings (certutil→T1105)
+        Semantic-->>HybridEngine: SemanticResult[]
+        HybridEngine->>Keyword: search(finding_text)
+        Keyword-->>HybridEngine: KeywordResult[] (BM25 scores)
+        Note over HybridEngine: Reciprocal Rank Fusion<br/>score(d) = Σ 1/(60 + rank)
+        HybridEngine->>HybridEngine: Fuse results
+    end
+
+    rect rgb(255, 248, 220)
+        Note over HybridEngine,Oxigraph: Co-occurrence Inductive Bias
+        HybridEngine->>Graph: get_cooccurring_techniques(top_3_seeds)
+        Graph->>Oxigraph: SPARQL: techniques in same campaigns/groups
+        Oxigraph-->>Graph: co-occurring techniques + counts
+        Note over HybridEngine: Weighted co-occurrence boost<br/>campaigns 1.5x, groups 1.0x<br/>+ time-decay on campaign age
+        HybridEngine->>HybridEngine: Re-rank by boosted scores
+    end
+
+    rect rgb(240, 230, 255)
+        Note over HybridEngine,Oxigraph: CWE/CAPEC Injection + Platform Boosting
+        HybridEngine->>HybridEngine: Extract CWE-nnn from finding text
+        HybridEngine->>Graph: get_techniques_for_cwe(CWE-nnn)
+        Graph->>Oxigraph: SPARQL: CWE → CAPEC → Technique
+        Oxigraph-->>Graph: mapped techniques
+        HybridEngine->>HybridEngine: Inject + boost CWE techniques (1.4x)
+        HybridEngine->>HybridEngine: Detect platforms in text
+        HybridEngine->>HybridEngine: Boost matching platforms (1.2x)
+    end
+
+    rect rgb(212, 237, 218)
+        Note over HybridEngine,Oxigraph: Symbolic Enrichment - SPARQL
+        loop For each candidate technique
+            HybridEngine->>Graph: get_technique(attack_id)
+            Graph->>Oxigraph: SPARQL query
+            Oxigraph-->>Graph: technique details
+            HybridEngine->>Graph: get_software_for_technique()
+            HybridEngine->>Graph: get_campaigns_for_technique()
+            HybridEngine->>Graph: get_mitigations_with_inheritance()
+            HybridEngine->>Graph: get_d3fend_for_technique()
+            HybridEngine->>Graph: get_detection_strategies()
+            HybridEngine->>Graph: get_data_sources()
+        end
+        Graph-->>HybridEngine: enriched graph data
+    end
+
+    HybridEngine-->>CLI: QueryResult[EnrichedTechnique[]]
+
+    rect rgb(255, 243, 205)
+        Note over CLI,LLM: Single-Stage LLM Analysis
+        CLI->>CLI: Encode context (XML default, TOON, or JSON)
+        CLI->>LLM: analyze(finding, encoded_context)
+        Note right of LLM: Task: Classify + write remediation<br/>Constrained to provided candidates<br/>Output: techniques, mitigations, D3FEND
+        LLM-->>CLI: AnalysisResult JSON
+        CLI->>CLI: Validate all IDs against retrieval set
+    end
+
+    CLI-->>User: Techniques (validated),<br/>Mitigations (prioritized),<br/>D3FEND Countermeasures,<br/>Detections
