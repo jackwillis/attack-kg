@@ -69,6 +69,7 @@ def build(
     data_dir: Path = typer.Option(DEFAULT_DIR, "--data-dir", "-d"),
     skip_lolbas: bool = typer.Option(False, "--skip-lolbas"),
     skip_gtfobins: bool = typer.Option(False, "--skip-gtfobins"),
+    skip_capec: bool = typer.Option(False, "--skip-capec"),
 ):
     """Load RDF into Oxigraph and build vector store."""
     from src.store.graph import AttackGraph
@@ -101,6 +102,7 @@ def build(
     build_vector_store(
         graph, persist_dir=vector_path, data_dir=dd,
         include_lolbas=not skip_lolbas, include_gtfobins=not skip_gtfobins,
+        include_capec=not skip_capec,
     )
     console.print("[bold green]Build complete.[/bold green]")
 

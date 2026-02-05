@@ -32,7 +32,7 @@ class SemanticSearch:
             meta = r["metadata"]
             aid = meta.get("attack_id", r["id"])
             source = meta.get("type", "attack")
-            if source in ("lolbas", "gtfobins") and aid in seen:
+            if source in ("lolbas", "gtfobins", "capec") and aid in seen:
                 continue
             seen.add(aid)
             tactics_raw = meta.get("tactics", "")

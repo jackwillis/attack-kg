@@ -128,6 +128,7 @@ def extract_techniques(graph) -> list[dict[str, Any]]:
 def build_vector_store(
     graph, persist_dir: Path | str | None = None, data_dir: Path | str = Path("data"),
     include_lolbas: bool = True, include_gtfobins: bool = True,
+    include_capec: bool = True,
 ) -> VectorStore:
     """Build ChromaDB vector store from graph + external sources."""
     console.print("[bold]Extracting techniques...[/bold]")
@@ -140,6 +141,12 @@ def build_vector_store(
     if include_gtfobins:
         from src.ingest.gtfobins import parse_gtfobins
         ext_docs.extend(parse_gtfobins(Path(data_dir) / "gtfobins"))
+    if include_capec:
+        capec_xml = Path(data_dir) / "capec_latest.xml"
+        if capec_xml.exists():
+            from src.ingest.capec import parse_capec, parse_capec_for_embedding
+            mappings = parse_capec(capec_xml)
+            ext_docs.extend(parse_capec_for_embedding(mappings))
 
     all_docs = tech_docs + ext_docs
     console.print(f"[bold]Generating embeddings for {len(all_docs)} documents...[/bold]")

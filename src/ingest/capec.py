@@ -141,6 +141,40 @@ def capec_to_ntriples(mappings: dict[str, Any]) -> str:
     return "".join(triples)
 
 
+def parse_capec_for_embedding(mappings: dict[str, Any]) -> list[dict[str, Any]]:
+    """Convert parsed CAPEC mappings into documents for ChromaDB embedding.
+
+    One document per (CAPEC pattern, ATT&CK technique) pair.
+    Returns list of dicts with: id, text, metadata.
+    """
+    docs: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for capec_id, techs in mappings["capec_to_attack"].items():
+        info = mappings["capec_info"].get(capec_id, {})
+        name = info.get("name", capec_id)
+        desc = info.get("description", "")
+        for attack_id in techs:
+            doc_id = f"capec:{capec_id}:{attack_id}"
+            if doc_id in seen:
+                continue
+            seen.add(doc_id)
+            text = f"Attack Pattern: {name}\nID: {capec_id}\nTechnique: {attack_id}"
+            if desc:
+                text += f"\nDescription: {desc}"
+            docs.append({
+                "id": doc_id,
+                "text": text,
+                "metadata": {
+                    "type": "capec",
+                    "capec_id": capec_id,
+                    "attack_id": attack_id,
+                    "name": name,
+                },
+            })
+    console.print(f"[green]CAPEC embedding: {len(docs)} documents[/green]")
+    return docs
+
+
 def convert_capec_file(xml_path: Path, output_path: Path) -> Path:
     """Parse CAPEC XML and convert to N-Triples."""
     mappings = parse_capec(xml_path)

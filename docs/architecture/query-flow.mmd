@@ -16,7 +16,7 @@ sequenceDiagram
     CLI->>HybridEngine: query(finding_text, top_k=5)
 
     rect rgb(232, 244, 248)
-        Note over HybridEngine,Keyword: Hybrid Retrieval - RRF Fusion<br/>(ATT&CK + LOLBAS + GTFOBins)
+        Note over HybridEngine,Keyword: Hybrid Retrieval - RRF Fusion<br/>(ATT&CK + LOLBAS + GTFOBins + CAPEC)
         HybridEngine->>Semantic: search(finding_text)
         Semantic->>ChromaDB: query(embedding, n_results=10)
         ChromaDB-->>Semantic: semantic candidates + similarity scores<br/>+ tool→technique mappings (certutil→T1105)
@@ -37,14 +37,13 @@ sequenceDiagram
     end
 
     rect rgb(240, 230, 255)
-        Note over HybridEngine,Oxigraph: CWE/CAPEC Injection + Platform Boosting
+        Note over HybridEngine,Oxigraph: CWE/CAPEC Injection + CAPEC Semantic Matching
         HybridEngine->>HybridEngine: Extract CWE-nnn from finding text
         HybridEngine->>Graph: get_techniques_for_cwe(CWE-nnn)
         Graph->>Oxigraph: SPARQL: CWE → CAPEC → Technique
         Oxigraph-->>Graph: mapped techniques
         HybridEngine->>HybridEngine: Inject + boost CWE techniques (1.4x)
-        HybridEngine->>HybridEngine: Detect platforms in text
-        HybridEngine->>HybridEngine: Boost matching platforms (1.2x)
+        Note over HybridEngine: CAPEC patterns also matched<br/>semantically via ChromaDB embeddings
     end
 
     rect rgb(212, 237, 218)

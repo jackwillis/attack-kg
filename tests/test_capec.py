@@ -1,9 +1,9 @@
-"""Tests for CAPEC XML parsing and N-Triples generation."""
+"""Tests for CAPEC XML parsing, N-Triples generation, and embedding."""
 
 from pathlib import Path
 from xml.etree.ElementTree import Element, SubElement, ElementTree
 
-from src.ingest.capec import parse_capec, capec_to_ntriples, _nt_escape
+from src.ingest.capec import parse_capec, capec_to_ntriples, parse_capec_for_embedding, _nt_escape
 
 
 def _write_capec_xml(tmp_path: Path, attack_patterns: list[dict]) -> Path:
@@ -134,3 +134,61 @@ class TestCapecToNTriples:
         mappings = {"capec_to_attack": {}, "cwe_to_capec": {}, "capec_info": {}}
         nt = capec_to_ntriples(mappings)
         assert nt == ""
+
+
+class TestParseCapecForEmbedding:
+    def test_returns_correct_format(self, tmp_path):
+        xml = _write_capec_xml(tmp_path, [
+            {"id": "86", "name": "XSS via HTTP Headers",
+             "description": "Cross-site scripting via headers.",
+             "attack_ids": ["T1059.007"]},
+        ])
+        mappings = parse_capec(xml)
+        docs = parse_capec_for_embedding(mappings)
+        assert len(docs) == 1
+        doc = docs[0]
+        assert doc["id"] == "capec:CAPEC-86:T1059.007"
+        assert "Attack Pattern: XSS via HTTP Headers" in doc["text"]
+        assert "ID: CAPEC-86" in doc["text"]
+        assert "Technique: T1059.007" in doc["text"]
+        assert "Description: Cross-site scripting via headers." in doc["text"]
+        assert doc["metadata"]["type"] == "capec"
+        assert doc["metadata"]["capec_id"] == "CAPEC-86"
+        assert doc["metadata"]["attack_id"] == "T1059.007"
+        assert doc["metadata"]["name"] == "XSS via HTTP Headers"
+
+    def test_multiple_techniques_per_pattern(self, tmp_path):
+        xml = _write_capec_xml(tmp_path, [
+            {"id": "86", "name": "XSS",
+             "attack_ids": ["T1059.007", "T1189"]},
+        ])
+        mappings = parse_capec(xml)
+        docs = parse_capec_for_embedding(mappings)
+        assert len(docs) == 2
+        ids = {d["id"] for d in docs}
+        assert "capec:CAPEC-86:T1059.007" in ids
+        assert "capec:CAPEC-86:T1189" in ids
+
+    def test_deduplication(self):
+        mappings = {
+            "capec_to_attack": {"CAPEC-86": ["T1059.007", "T1059.007"]},
+            "cwe_to_capec": {},
+            "capec_info": {"CAPEC-86": {"name": "XSS", "description": "desc"}},
+        }
+        docs = parse_capec_for_embedding(mappings)
+        assert len(docs) == 1
+
+    def test_empty_input(self):
+        mappings = {"capec_to_attack": {}, "cwe_to_capec": {}, "capec_info": {}}
+        docs = parse_capec_for_embedding(mappings)
+        assert docs == []
+
+    def test_no_description(self):
+        mappings = {
+            "capec_to_attack": {"CAPEC-99": ["T1110"]},
+            "cwe_to_capec": {},
+            "capec_info": {"CAPEC-99": {"name": "Brute Force", "description": ""}},
+        }
+        docs = parse_capec_for_embedding(mappings)
+        assert len(docs) == 1
+        assert "Description:" not in docs[0]["text"]

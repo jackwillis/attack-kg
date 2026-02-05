@@ -1,4 +1,4 @@
-"""Tests for hybrid query engine: RRF, co-occurrence, platform, CWE."""
+"""Tests for hybrid query engine: RRF, co-occurrence, CWE."""
 
 from dataclasses import dataclass, field
 from typing import Any
@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.query.engine import (
-    HybridQueryEngine, EnrichedTechnique, PLATFORM_PATTERNS,
+    HybridQueryEngine, EnrichedTechnique,
     CVE_PATTERN, CWE_PATTERN,
 )
 from src.query.semantic import SemanticResult
@@ -74,62 +74,6 @@ class TestRRFFusion:
         kw = _kw(("T1110", "Brute Force", 5.0))
         result = engine._rrf(sem, kw)
         assert all(r["rrf_score"] > 0 for r in result)
-
-
-class TestPlatformDetection:
-    def test_detects_windows(self):
-        engine = HybridQueryEngine(MagicMock(), MagicMock())
-        assert "Windows" in engine._detect_platforms("PowerShell attack on Windows server")
-        assert "Windows" in engine._detect_platforms("registry modification found")
-        assert "Windows" in engine._detect_platforms("mimikatz credential dump")
-
-    def test_detects_linux(self):
-        engine = HybridQueryEngine(MagicMock(), MagicMock())
-        assert "Linux" in engine._detect_platforms("Ubuntu server compromise via /etc/passwd")
-        assert "Linux" in engine._detect_platforms("cron job persistence")
-        assert "Linux" in engine._detect_platforms("sudo privilege escalation")
-
-    def test_detects_macos(self):
-        engine = HybridQueryEngine(MagicMock(), MagicMock())
-        assert "macOS" in engine._detect_platforms("macOS launchd persistence")
-
-    def test_detects_cloud(self):
-        engine = HybridQueryEngine(MagicMock(), MagicMock())
-        assert "AWS" in engine._detect_platforms("AWS S3 bucket misconfiguration")
-        assert "Azure AD" in engine._detect_platforms("Azure AD conditional access bypass")
-        assert "GCP" in engine._detect_platforms("Google Cloud GCP IAM")
-
-    def test_no_platform(self):
-        engine = HybridQueryEngine(MagicMock(), MagicMock())
-        assert engine._detect_platforms("generic security finding") == []
-
-    def test_multiple_platforms(self):
-        engine = HybridQueryEngine(MagicMock(), MagicMock())
-        result = engine._detect_platforms("Windows and Linux servers with AWS accounts")
-        assert "Windows" in result
-        assert "Linux" in result
-        assert "AWS" in result
-
-
-class TestPlatformBoosting:
-    def test_boosts_matching_platform(self):
-        engine = HybridQueryEngine(MagicMock(), MagicMock())
-        combined = [
-            {"attack_id": "T1", "platforms": ["Windows"], "rrf_score": 1.0},
-            {"attack_id": "T2", "platforms": ["Linux"], "rrf_score": 1.0},
-        ]
-        result = engine._boost_platforms(combined, ["Windows"])
-        win = [r for r in result if r["attack_id"] == "T1"][0]
-        lin = [r for r in result if r["attack_id"] == "T2"][0]
-        assert win["rrf_score"] > lin["rrf_score"]
-
-    def test_no_boost_without_match(self):
-        engine = HybridQueryEngine(MagicMock(), MagicMock())
-        combined = [
-            {"attack_id": "T1", "platforms": ["macOS"], "rrf_score": 1.0},
-        ]
-        result = engine._boost_platforms(combined, ["Windows"])
-        assert result[0]["rrf_score"] == 1.0
 
 
 class TestCWEDetection:

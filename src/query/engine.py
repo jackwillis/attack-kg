@@ -15,25 +15,6 @@ from src.query.keyword import KeywordSearch
 
 console = Console()
 
-# Platform detection patterns (finding text -> platform name)
-# TODO: Make comprehensive — add IaaS, SaaS, containers, network devices, etc.
-PLATFORM_PATTERNS: dict[str, list[str]] = {
-    "Windows": [
-        r"\bwindows\b", r"\bpowershell\b", r"\b\.exe\b", r"\bregistry\b",
-        r"\biis\b", r"\bactive\s+directory\b", r"\bc:\\", r"\bgroup\s+policy\b",
-        r"\bwmi\b", r"\bntlm\b", r"\bkerberos\b", r"\bmimikatz\b",
-    ],
-    "Linux": [
-        r"\blinux\b", r"\bubuntu\b", r"\bcentos\b", r"\bdebian\b", r"\brhel\b",
-        r"\b/var/\b", r"\b/etc/\b", r"\bsystemd\b", r"\bauditd\b", r"\bcron\b",
-        r"\bsudo\b", r"\bbash\b", r"\bapt\b", r"\byum\b",
-    ],
-    "macOS": [r"\bmacos\b", r"\bmac\s+os\b", r"\bdarwin\b", r"\blaunchd\b"],
-    "Azure AD": [r"\bazure\s*ad\b", r"\bentra\b", r"\bazure\s+active\b", r"\bconditional\s+access\b"],
-    "AWS": [r"\baws\b", r"\bs3\b", r"\blambda\b", r"\bec2\b", r"\biam\b"],
-    "GCP": [r"\bgcp\b", r"\bgoogle\s+cloud\b"],
-}
-
 # CVE/CWE pattern detection
 CVE_PATTERN = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.IGNORECASE)
 CWE_PATTERN = re.compile(r"\bCWE-\d{1,4}\b", re.IGNORECASE)
@@ -116,12 +97,7 @@ class HybridQueryEngine:
         if cwe_techniques:
             combined = self._inject_cwe_techniques(combined, cwe_techniques)
 
-        # Step 5: Platform-aware boosting
-        detected = self._detect_platforms(question)
-        if detected:
-            combined = self._boost_platforms(combined, detected)
-
-        # Step 6: Take top_k and enrich
+        # Step 5: Take top_k and enrich
         top = combined[:top_k]
         techniques = []
         for item in top:
@@ -137,13 +113,10 @@ class HybridQueryEngine:
         mode = "hybrid_rrf" if use_bm25 else "semantic"
         if use_cooccurrence:
             mode += "+cooccurrence"
-        if detected:
-            mode += f"+platform({','.join(detected)})"
         if cwe_techniques:
             mode += "+cwe"
         return QueryResult(query=question, techniques=techniques,
-                           metadata={"top_k": top_k, "mode": mode, "count": len(techniques),
-                                     "platforms_detected": detected})
+                           metadata={"top_k": top_k, "mode": mode, "count": len(techniques)})
 
     def _rrf(self, sem: list[SemanticResult], kw: list, k: int = 60) -> list[dict]:
         scores: dict[str, float] = {}
@@ -215,30 +188,6 @@ class HybridQueryEngine:
                 item["cooccurrence_boost"] = boosts[aid]
         combined.sort(key=lambda x: x.get("rrf_score", 0), reverse=True)
         return combined[:top_k * 2]
-
-    def _detect_platforms(self, text: str) -> list[str]:
-        """Detect platform mentions in finding text."""
-        detected = []
-        text_lower = text.lower()
-        for platform, patterns in PLATFORM_PATTERNS.items():
-            for pattern in patterns:
-                if re.search(pattern, text_lower):
-                    detected.append(platform)
-                    break
-        return detected
-
-    def _boost_platforms(
-        self, combined: list[dict], platforms: list[str], boost: float = 1.2,
-    ) -> list[dict]:
-        """Boost techniques matching detected platforms."""
-        platform_set = set(platforms)
-        for item in combined:
-            item_platforms = set(item.get("platforms", []))
-            if item_platforms & platform_set:
-                item["rrf_score"] = item.get("rrf_score", 0) * boost
-                item["platform_boost"] = True
-        combined.sort(key=lambda x: x.get("rrf_score", 0), reverse=True)
-        return combined
 
     def _extract_cwe_techniques(self, text: str) -> list[dict]:
         """Extract CWE IDs from text and map to ATT&CK techniques via CAPEC."""

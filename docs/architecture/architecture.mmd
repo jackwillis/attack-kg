@@ -29,7 +29,7 @@ flowchart TB
         end
 
         RDF["attack.nt + capec.nt<br/><i>RDF N-Triples<br/>(74K+ triples)</i>"]
-        EMB["embeddings.py<br/><i>sentence-transformers<br/>nomic-embed-text-v1.5<br/>+LOLBAS/GTFOBins</i>"]
+        EMB["embeddings.py<br/><i>sentence-transformers<br/>nomic-embed-text-v1.5<br/>+LOLBAS/GTFOBins/CAPEC</i>"]
     end
 
     subgraph Storage["Persistent Storage Layer"]
@@ -47,7 +47,7 @@ flowchart TB
 
     subgraph Query["HybridQueryEngine (engine.py)"]
         direction TB
-        HYB["<b>Neuro-Symbolic Core</b><br/>RRF Fusion + Co-occurrence<br/>+ Platform Boosting<br/>+ CWE/CAPEC Injection"]
+        HYB["<b>Neuro-Symbolic Core</b><br/>RRF Fusion + Co-occurrence<br/>+ CWE/CAPEC Injection<br/>+ CAPEC Semantic Matching"]
     end
 
     subgraph Reasoning["Reasoning Module"]
@@ -82,6 +82,7 @@ flowchart TB
     STIX --> EMB
     LB --> EMB
     GT --> EMB
+    CP --> EMB
     EMB --> CHROMA
 
     %% Store connections
