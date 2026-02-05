@@ -9,7 +9,13 @@ from rich.console import Console
 console = Console()
 
 DEFAULT_MODEL = "basel/ATTACK-BERT"
+ATTACK_BERT_REVISION = "81e30f983a822c606825507b63ae318a6830a8a2"
 NOMIC_REVISION = "e5cf08aadaa33385f5990def41f7a23405aec398"
+
+_MODEL_REVISIONS = {
+    "ATTACK-BERT": ATTACK_BERT_REVISION,
+    "nomic": NOMIC_REVISION,
+}
 
 
 class EmbeddingGenerator:
@@ -17,7 +23,9 @@ class EmbeddingGenerator:
 
     def __init__(self, model: str = DEFAULT_MODEL):
         self.model_name = model
-        self._revision = NOMIC_REVISION if "nomic" in model else None
+        self._revision = next(
+            (rev for key, rev in _MODEL_REVISIONS.items() if key in model), None
+        )
         self._offline = os.environ.get("ATTACK_KG_OFFLINE", "").lower() in ("1", "true")
         self._model = None
 

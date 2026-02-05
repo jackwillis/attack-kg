@@ -1,6 +1,8 @@
 """Tests for embedding model defaults."""
 
-from src.ingest.embeddings import DEFAULT_MODEL, EmbeddingGenerator
+from src.ingest.embeddings import (
+    ATTACK_BERT_REVISION, DEFAULT_MODEL, EmbeddingGenerator, NOMIC_REVISION,
+)
 
 
 class TestEmbeddingDefaults:
@@ -13,8 +15,12 @@ class TestEmbeddingDefaults:
 
     def test_nomic_revision_applied(self):
         gen = EmbeddingGenerator("nomic-ai/nomic-embed-text-v1.5")
-        assert gen._revision is not None
+        assert gen._revision == NOMIC_REVISION
 
-    def test_attack_bert_no_revision(self):
+    def test_attack_bert_revision_pinned(self):
         gen = EmbeddingGenerator()
+        assert gen._revision == ATTACK_BERT_REVISION
+
+    def test_unknown_model_no_revision(self):
+        gen = EmbeddingGenerator("some-other/model")
         assert gen._revision is None
