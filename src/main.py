@@ -10,13 +10,7 @@ from rich.console import Console
 app = typer.Typer(help="Security remediation engine powered by MITRE ATT&CK")
 console = Console()
 
-DEFAULT_DIR = Path.home() / ".attack_kg"
-
-
-def _data_dir(base: Path) -> Path:
-    d = base / "data"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+DEFAULT_DIR = Path("data")
 
 
 @app.command()
@@ -32,16 +26,16 @@ def download(
     from src.ingest.download import download_attack, download_d3fend, download_lolbas, download_gtfobins
     from src.ingest.capec import download_capec
 
-    dd = _data_dir(data_dir)
-    download_attack(dd, force=force)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    download_attack(data_dir, force=force)
     if not skip_d3fend:
-        download_d3fend(dd, force=force)
+        download_d3fend(data_dir, force=force)
     if not skip_lolbas:
-        download_lolbas(dd, force=force)
+        download_lolbas(data_dir, force=force)
     if not skip_gtfobins:
-        download_gtfobins(dd, force=force)
+        download_gtfobins(data_dir, force=force)
     if not skip_capec:
-        download_capec(dd, force=force)
+        download_capec(data_dir, force=force)
     console.print("[bold green]Download complete.[/bold green]")
 
 
@@ -53,15 +47,14 @@ def ingest(
     from src.ingest.stix_to_rdf import convert_stix_file
     from src.ingest.capec import convert_capec_file
 
-    dd = _data_dir(data_dir)
-    stix = dd / "enterprise-attack.json"
+    stix = data_dir / "enterprise-attack.json"
     if not stix.exists():
         console.print("[red]Run 'download' first.[/red]")
         raise typer.Exit(1)
-    convert_stix_file(stix, dd / "attack.nt")
-    capec_xml = dd / "capec_latest.xml"
+    convert_stix_file(stix, data_dir / "attack.nt")
+    capec_xml = data_dir / "capec_latest.xml"
     if capec_xml.exists():
-        convert_capec_file(capec_xml, dd / "capec.nt")
+        convert_capec_file(capec_xml, data_dir / "capec.nt")
     console.print("[bold green]Ingest complete.[/bold green]")
 
 
@@ -76,24 +69,23 @@ def build(
     from src.store.graph import AttackGraph
     from src.ingest.embeddings import build_vector_store
 
-    dd = _data_dir(data_dir)
-    store_path = data_dir / "store"
+    store_path = data_dir / "graph"
     vector_path = data_dir / "vectors"
 
     graph = AttackGraph(store_path)
-    nt = dd / "attack.nt"
+    nt = data_dir / "attack.nt"
     if not nt.exists():
         console.print("[red]Run 'ingest' first.[/red]")
         raise typer.Exit(1)
     graph.load_file(nt, fmt="nt", clear=True)
 
     # Load D3FEND (additive — no clear)
-    d3fend = dd / "d3fend.ttl"
+    d3fend = data_dir / "d3fend.ttl"
     if d3fend.exists():
         graph.load_file(d3fend, fmt="ttl")
 
     # Load CAPEC (additive — no clear)
-    capec_nt = dd / "capec.nt"
+    capec_nt = data_dir / "capec.nt"
     if capec_nt.exists():
         graph.load_file(capec_nt, fmt="nt")
 
@@ -101,7 +93,7 @@ def build(
     console.print(f"[green]Graph: {stats}[/green]")
 
     build_vector_store(
-        graph, persist_dir=vector_path, data_dir=dd,
+        graph, persist_dir=vector_path, data_dir=data_dir,
         include_lolbas=not skip_lolbas, include_gtfobins=not skip_gtfobins,
         include_capec=not skip_capec,
     )
@@ -130,7 +122,7 @@ def _build_analyzer(
     from src.reasoning.llm import get_backend
     from src.reasoning.analyzer import AttackAnalyzer
 
-    graph = AttackGraph(data_dir / "store")
+    graph = AttackGraph(data_dir / "graph")
     semantic = SemanticSearch(data_dir / "vectors")
     engine = HybridQueryEngine(graph, semantic, enable_bm25=not no_hybrid)
     llm = get_backend(backend, model)
