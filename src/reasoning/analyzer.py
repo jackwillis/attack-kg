@@ -175,7 +175,11 @@ class AttackAnalyzer:
         valid_mit_ids = {m["attack_id"] for m in mitigations}
         valid_d3f_ids = {d["d3fend_id"] for d in d3fend}
 
-        context = encode_context(result.techniques, mitigations, d3fend, self.context_format)
+        finding_type = result.metadata.get("finding_type", "")
+        context = encode_context(
+            result.techniques, mitigations, d3fend, self.context_format,
+            finding_type=finding_type,
+        )
 
         debug.log_context(self.context_format, context, mitigations, d3fend, {
             "techniques": sorted(valid_tech_ids),
