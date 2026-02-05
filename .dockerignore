@@ -1,0 +1,12 @@
+.git
+.gitignore
+.venv
+.claude
+CLAUDE.md
+tests/
+data/
+__pycache__/
+*.pyc
+.pytest_cache/
+prolog-debug-mcp/
+v2-prompt.md

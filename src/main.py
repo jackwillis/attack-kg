@@ -194,7 +194,8 @@ def repl(
             try:
                 text = Path(line[1:]).read_text().strip()
             except Exception as e:
-                console.print(f"[red]Error reading file: {e}[/red]")
+                from rich.markup import escape as _esc
+                console.print(f"[red]Error reading file: {_esc(str(e))}[/red]")
                 continue
         else:
             text = line
@@ -203,7 +204,8 @@ def repl(
             result = analyzer.analyze(text)
             render_analysis(result, console)
         except Exception as e:
-            console.print(f"[red]Error: {e}[/red]")
+            from rich.markup import escape as _esc
+            console.print(f"[red]Error: {_esc(str(e))}[/red]")
 
         try:
             readline.write_history_file(str(history_file))
