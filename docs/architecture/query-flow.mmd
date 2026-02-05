@@ -85,12 +85,13 @@ sequenceDiagram
 
     rect rgb(255, 243, 205)
         Note over CLI,LLM: Single-Stage LLM Analysis
-        CLI->>CLI: Encode context (XML default, TOON, or JSON)
+        CLI->>CLI: Prune context (focus mitigations on top 3 techniques,<br/>scope D3FEND to surviving mitigations)
+        CLI->>CLI: Encode context (XML default, TOON, or JSON)<br/>Skip software section for vulnerability findings
         CLI->>LLM: analyze(finding, encoded_context)
-        Note right of LLM: Task: Classify + write remediation<br/>Constrained to provided candidates<br/>Output: techniques, mitigations, D3FEND
+        Note right of LLM: Task: Classify + write remediation<br/>Constrained to provided candidates<br/>Output: techniques, mitigations, D3FEND, detections
         LLM-->>CLI: AnalysisResult JSON
-        CLI->>CLI: Validate all IDs against retrieval set
+        CLI->>CLI: Validate technique/mitigation/D3FEND IDs<br/>+ data source names against retrieval set
         CLI->>CLI: Check router/LLM finding type agreement
     end
 
-    CLI-->>User: Techniques (validated),<br/>Mitigations (prioritized),<br/>D3FEND Countermeasures,<br/>Detections
+    CLI-->>User: Techniques (validated),<br/>Mitigations (prioritized),<br/>D3FEND Countermeasures,<br/>Detections (anchored to ATT&CK data sources)

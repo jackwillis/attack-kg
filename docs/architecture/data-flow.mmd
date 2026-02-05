@@ -62,7 +62,8 @@ sequenceDiagram
             Hybrid->>Graph: get_d3fend_for_technique(id)
             Graph-->>Hybrid: [D3-MFA, D3-IOPR, ...]
             Hybrid->>Graph: get_detection_strategies(id)
-            Graph-->>Hybrid: detection approaches
+            Hybrid->>Graph: get_data_sources(id)
+            Graph-->>Hybrid: detection approaches + data source names
         end
     end
 
@@ -70,11 +71,12 @@ sequenceDiagram
 
     rect rgb(255, 230, 230)
         Note over CLI,LLM: Step 6: Single-Stage LLM Analysis
-        CLI->>CLI: Build context (XML default, or TOON/JSON)
+        CLI->>CLI: Prune context (focus mitigations on top 3 techniques)
+        CLI->>CLI: Encode context (XML default, TOON, or JSON)<br/>Skip software for vulnerability findings
         CLI->>LLM: analyze(finding, encoded_context)
-        Note right of LLM: Classify techniques + write remediation<br/>Constrained to provided candidates<br/>Output: techniques, mitigations, D3FEND
+        Note right of LLM: Classify techniques + write remediation<br/>Constrained to provided candidates<br/>Output: techniques, mitigations, D3FEND, detections
         LLM-->>CLI: AnalysisResult JSON
-        CLI->>CLI: Validate IDs against retrieval set<br/>Check router/LLM type agreement
+        CLI->>CLI: Validate IDs + data source names<br/>against retrieval set
     end
 
     CLI-->>User: AnalysisResult<br/>{techniques, remediations, detections, d3fend}
