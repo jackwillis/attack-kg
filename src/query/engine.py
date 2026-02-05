@@ -116,6 +116,8 @@ class HybridQueryEngine:
         self.semantic = semantic
         self._keyword: KeywordSearch | None = None
         self._enable_bm25 = enable_bm25
+        self._sw_index: dict[str, str] | None = None  # lowered name → software_id
+        self._sw_pattern: re.Pattern | None = None
 
     @property
     def keyword(self) -> KeywordSearch | None:
@@ -170,7 +172,12 @@ class HybridQueryEngine:
         # Step 4c: Vulnerability keyword technique injection
         combined = self._inject_vuln_techniques(combined, question, boost=vuln_kw_boost)
 
-        # Step 4d: Platform-aware boosting
+        # Step 4d: Software/tool name technique injection
+        sw_techniques = self._extract_software_techniques(question)
+        if sw_techniques:
+            combined = self._inject_software_techniques(combined, sw_techniques, boost=1.5)
+
+        # Step 4e: Platform-aware boosting
         if routing.platforms:
             combined = self._boost_platform_match(combined, routing.platforms)
 
@@ -192,6 +199,8 @@ class HybridQueryEngine:
             mode += "+cooccurrence"
         if cwe_techniques:
             mode += "+cwe"
+        if sw_techniques:
+            mode += "+software"
         metadata = {
             "top_k": top_k, "mode": mode, "count": len(techniques),
             "finding_type": routing.finding_type.value,
@@ -352,6 +361,74 @@ class HybridQueryEngine:
             if item_platforms & platform_set:
                 item["rrf_score"] = item.get("rrf_score", 0) * boost
                 item["platform_boost"] = True
+        combined.sort(key=lambda x: x.get("rrf_score", 0), reverse=True)
+        return combined
+
+    @property
+    def _software_index(self) -> tuple[dict[str, str], re.Pattern | None]:
+        """Lazy-init software name → ID index + compiled match pattern."""
+        if self._sw_index is None:
+            idx: dict[str, str] = {}
+            for sw in self.graph.get_all_software_names():
+                name = sw["name"]
+                # Skip very short names that cause false positives
+                if len(name) < 3:
+                    continue
+                idx[name.lower()] = sw["attack_id"]
+            self._sw_index = idx
+            if idx:
+                # Build regex alternation sorted longest-first for greedy matching
+                escaped = [re.escape(n) for n in sorted(idx, key=len, reverse=True)]
+                self._sw_pattern = re.compile(
+                    r"\b(?:" + "|".join(escaped) + r")\b", re.IGNORECASE,
+                )
+            console.print(f"[dim]Software index: {len(idx)} names/aliases[/dim]")
+        return self._sw_index, self._sw_pattern
+
+    def _extract_software_techniques(self, text: str) -> list[dict]:
+        """Extract mentioned software/tool names and map to techniques."""
+        idx, pattern = self._software_index
+        if not pattern:
+            return []
+        matches = pattern.findall(text)
+        if not matches:
+            return []
+        # Deduplicate software IDs, then look up techniques
+        sw_ids = {idx[m.lower()] for m in matches if m.lower() in idx}
+        techniques: list[dict] = []
+        seen: set[str] = set()
+        for sid in sw_ids:
+            for t in self.graph.get_techniques_for_software(sid):
+                if t["attack_id"] not in seen:
+                    seen.add(t["attack_id"])
+                    techniques.append(t)
+        if techniques:
+            names = sorted({m for m in matches})
+            console.print(f"[cyan]Software match: {', '.join(names)} -> "
+                          f"{len(techniques)} techniques[/cyan]")
+        return techniques
+
+    def _inject_software_techniques(
+        self, combined: list[dict], sw_techniques: list[dict],
+        boost: float = 1.5,
+    ) -> list[dict]:
+        """Inject/boost techniques derived from software name matches."""
+        existing = {item["attack_id"] for item in combined}
+        for t in sw_techniques:
+            aid = t["attack_id"]
+            if aid in existing:
+                for item in combined:
+                    if item["attack_id"] == aid:
+                        item["rrf_score"] = item.get("rrf_score", 0) * boost
+                        item["software_boost"] = True
+                        break
+            else:
+                combined.append({
+                    "attack_id": aid, "name": t.get("name", ""),
+                    "tactics": [], "platforms": [],
+                    "rrf_score": 0.01 * boost,
+                    "software_boost": True,
+                })
         combined.sort(key=lambda x: x.get("rrf_score", 0), reverse=True)
         return combined
 
