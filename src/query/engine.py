@@ -364,6 +364,14 @@ class HybridQueryEngine:
         combined.sort(key=lambda x: x.get("rrf_score", 0), reverse=True)
         return combined
 
+    # Common English words that happen to be ATT&CK software names.
+    # These only match with a qualifying suffix like .exe.
+    _SW_COMMON_WORDS = frozenset({
+        "at", "net", "cmd", "arp", "ftp", "tor", "page", "epic", "spark",
+        "anchor", "gold", "iron", "carbon", "agent", "rover", "matrix",
+        "ace", "get", "set", "run",
+    })
+
     @property
     def _software_index(self) -> tuple[dict[str, str], re.Pattern | None]:
         """Lazy-init software name → ID index + compiled match pattern."""
@@ -374,7 +382,12 @@ class HybridQueryEngine:
                 # Skip very short names that cause false positives
                 if len(name) < 3:
                     continue
-                idx[name.lower()] = sw["attack_id"]
+                low = name.lower()
+                # Common words only match with .exe suffix (handled separately)
+                if low in self._SW_COMMON_WORDS:
+                    idx[low + ".exe"] = sw["attack_id"]
+                    continue
+                idx[low] = sw["attack_id"]
             self._sw_index = idx
             if idx:
                 # Build regex alternation sorted longest-first for greedy matching
